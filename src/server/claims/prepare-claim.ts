@@ -31,6 +31,56 @@ export type PrepareClaim = (
   onProgress: (progress: ClaimProgress) => void
 ) => Promise<PreparedClaim>;
 
+const placeholderValues = new Set([
+  "",
+  "unknown",
+  "desconocido",
+  "no indicado",
+  "no disponible",
+  "n/a",
+  "null",
+  "undefined"
+]);
+
+function isPlaceholder(field: string, value: string) {
+  const normalized = value.trim().toLocaleLowerCase("es");
+  return placeholderValues.has(normalized) || normalized === field.toLocaleLowerCase("es") || normalized === field.replaceAll("_", " ").toLocaleLowerCase("es");
+}
+
+/**
+ * Keeps model output only when it contains evidence. Small local models can
+ * occasionally echo a JSON key (for example `amount: "amount"`) instead of
+ * an extracted value; treating that as present would hide required fields.
+ */
+function evidenceFields(transcript: string, requiredFields: readonly string[], proposed: Record<string, string>) {
+  const patterns: Record<string, RegExp> = {
+    amount: /(?:b\/.?|us\$|\$)\s*\d+(?:[.,]\d{1,2})?/iu,
+    date: /(?:\b\d{1,2}\s+de\s+[a-záéíóúñ]+|\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b)/iu,
+    location: /\bcajero\s+(?:de|en)\s+([^.,]+)/iu,
+    identificador_cajero: /(?:identificador(?:\s+(?:del|de))?\s+cajero|atm\s*id)\s*[:#-]?\s*([a-z0-9-]{3,})/iu,
+    hora_aproximada: /(?:a\s+las|hora(?:\s+aproximada)?(?:\s+fue)?|aproximadamente)\s+(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|h)?)/iu,
+    reference: /(?:referencia|ref\.?)\s*[:#-]?\s*([a-z0-9-]{4,})/iu,
+    lastFourDigits: /(?:terminad[ao]\s+en|últimos?\s+cuatro|ultimos?\s+cuatro|4\s+dígitos)\D*(\d{4})/iu,
+    destinationBank: /\bbanco\s+(?:destino|receptor)\s*[:#-]?\s*([^.,]+)/iu,
+    duplicateReference: /(?:segunda\s+referencia|referencia\s+duplicada)\s*[:#-]?\s*([a-z0-9-]{4,})/iu,
+    expectedBalance: /(?:saldo\s+esperado|esperaba\s+tener)\s*[:#-]?\s*((?:b\/.?|\$)\s*\d+(?:[.,]\d{1,2})?)/iu,
+    observedBalance: /(?:saldo\s+(?:observado|actual)|aparece\s+un\s+saldo)\s*[:#-]?\s*((?:b\/.?|\$)\s*\d+(?:[.,]\d{1,2})?)/iu,
+    observedMessage: /(?:mensaje(?:\s+mostrado)?|error)\s*[:"]\s*([^".]+)["]?/iu,
+    lastSuccessfulOperation: /(?:última\s+operación\s+exitosa|ultima\s+operacion\s+exitosa)\s*[:#-]?\s*([^.,]+)/iu,
+    deviceType: /\b(android|iphone|ios|windows|macos|celular|teléfono|telefono|computadora|tablet)\b/iu,
+    channel: /\b(sms|correo|email|aplicación|aplicacion|app|web|banca\s+en\s+línea|banca\s+en\s+linea)\b/iu
+  };
+  const normalizedTranscript = transcript.toLocaleLowerCase("es");
+  return Object.fromEntries(requiredFields.map((field) => {
+    const proposedValue = typeof proposed[field] === "string" ? proposed[field].trim() : "";
+    if (!isPlaceholder(field, proposedValue) && normalizedTranscript.includes(proposedValue.toLocaleLowerCase("es"))) {
+      return [field, proposedValue];
+    }
+    const match = patterns[field]?.exec(transcript);
+    return [field, match?.[1]?.trim() || match?.[0]?.trim() || ""];
+  }));
+}
+
 export function createClaimPreparer(dependencies: ClaimPreparerDependencies): PrepareClaim {
   const now = dependencies.now ?? Date.now;
   const removeAudio = dependencies.removeAudio ?? ((path) => rm(path, { force: true }));
@@ -96,8 +146,9 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         );
       }
 
+      const extractedFields = evidenceFields(transcript!, selectedProcedure.requiredFields, analysis.extractedFields);
       const missingInformation = selectedProcedure.requiredFields.filter((field) => {
-        const value = analysis.extractedFields[field];
+        const value = extractedFields[field];
         return typeof value !== "string" || value.trim().length === 0;
       });
       timingsMs.total = Math.max(0, now() - startedAt);
@@ -107,7 +158,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         // Procedure taxonomy is canonical; model product/category labels are redundant.
         product: selectedProcedure.product,
         category: selectedProcedure.category,
-        extractedFields: analysis.extractedFields,
+        extractedFields,
         summary: analysis.summary,
         procedure: {
           id: selectedProcedure.id,

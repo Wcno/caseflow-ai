@@ -4,7 +4,8 @@ test("caso ATM: edición, confirmación e historial local", async ({ page }) => 
   await page.goto("/");
   await page.getByRole("button", { name: "Cargar caso estrella de cajero" }).click();
   await page.getByRole("button", { name: "Preparar expediente" }).click();
-  await expect(page.getByText("Retiro debitado sin entrega de efectivo").first()).toBeVisible();
+  // The real local QVAC smoke path can take several seconds on integrated GPUs.
+  await expect(page.getByText("Retiro debitado sin entrega de efectivo").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Área responsable")).toHaveValue("Operaciones de Cajeros y Disputas");
   await expect(page.getByRole("list").getByText("identificador cajero")).toBeVisible();
   await page.getByLabel("Resumen").fill("Resumen ajustado por revisión humana.");
