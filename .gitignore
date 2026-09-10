@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+output/
+.qvac/
+data/*.db
+data/*.db-*
+tmp/
+*.log
+.env
+.env.*
+!.env.example
+
