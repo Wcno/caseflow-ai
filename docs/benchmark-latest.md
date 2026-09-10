@@ -6,6 +6,7 @@ Generado: 2026-09-10T04:20:35.309Z
 - Casos: 10
 - p95: 21.71 s
 - Umbral: < 120 s
+- Todos listos: sí
 - Resultado: APROBADO
 
 Descarga y arranque frío se reportan por separado y no se incluyen en esta métrica.

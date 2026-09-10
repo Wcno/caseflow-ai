@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -51,7 +51,12 @@ export function buildApp(dependencies: AppDependencies) {
       await mkdir(uploadDirectory, { recursive: true });
       const suffix = extname(upload.filename) || ".audio";
       const filePath = join(uploadDirectory, `${randomUUID()}${suffix}`);
-      await pipeline(upload.file, createWriteStream(filePath));
+      try {
+        await pipeline(upload.file, createWriteStream(filePath));
+      } catch (error) {
+        await rm(filePath, { force: true }).catch(() => undefined);
+        throw error;
+      }
       input = intakeInputSchema.parse({
         kind: "audio",
         filePath,

@@ -52,9 +52,10 @@ try {
 } finally { await runtime.dispose(); }
 const ordered = results.map((item) => item.milliseconds).sort((a, b) => a - b);
 const p95 = ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] ?? 0;
-const report = { generatedAt: new Date().toISOString(), started, modelMode: "QWEN3_600M_INST_Q4", p95Milliseconds: p95, thresholdMilliseconds: 120_000, passed: p95 < 120_000, results };
+const allReady = results.length === claims.length && results.every((result) => result.status === "ready");
+const report = { generatedAt: new Date().toISOString(), started, modelMode: "QWEN3_600M_INST_Q4", p95Milliseconds: p95, thresholdMilliseconds: 120_000, allReady, passed: allReady && p95 < 120_000, results };
 await mkdir(resolve("output"), { recursive: true });
 await writeFile(resolve("output", "benchmark.json"), JSON.stringify(report, null, 2));
-await writeFile(resolve("docs", "benchmark-latest.md"), `# Benchmark local\n\nGenerado: ${report.generatedAt}\n\n- Modelo: ${report.modelMode}\n- Casos: ${results.length}\n- p95: ${(p95 / 1000).toFixed(2)} s\n- Umbral: < 120 s\n- Resultado: ${report.passed ? "APROBADO" : "NO APROBADO"}\n\nDescarga y arranque frío se reportan por separado y no se incluyen en esta métrica.\n\n| Caso | Estado | Procedimiento | Tiempo |\n| --- | --- | --- | --- |\n${results.map((result) => `| ${result.index} | ${result.status} | ${result.procedure ?? result.error ?? "—"} | ${(result.milliseconds / 1000).toFixed(2)} s |`).join("\n")}\n`);
+await writeFile(resolve("docs", "benchmark-latest.md"), `# Benchmark local\n\nGenerado: ${report.generatedAt}\n\n- Modelo: ${report.modelMode}\n- Casos: ${results.length}\n- p95: ${(p95 / 1000).toFixed(2)} s\n- Umbral: < 120 s\n- Todos listos: ${allReady ? "sí" : "no"}\n- Resultado: ${report.passed ? "APROBADO" : "NO APROBADO"}\n\nDescarga y arranque frío se reportan por separado y no se incluyen en esta métrica.\n\n| Caso | Estado | Procedimiento | Tiempo |\n| --- | --- | --- | --- |\n${results.map((result) => `| ${result.index} | ${result.status} | ${result.procedure ?? result.error ?? "—"} | ${(result.milliseconds / 1000).toFixed(2)} s |`).join("\n")}\n`);
 console.log(JSON.stringify(report, null, 2));
 if (!report.passed) process.exitCode = 1;
