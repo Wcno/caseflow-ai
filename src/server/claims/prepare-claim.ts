@@ -81,13 +81,22 @@ function evidenceFields(transcript: string, requiredFields: readonly string[], p
   }));
 }
 
-function safeDraft(candidate: string, procedure: Procedure, missingInformation: readonly string[]) {
-  const leakedInstruction = /(?:el resumen tiene|responde únicamente|candidateprocedures|procedimientos candidatos|maximum|the summary|system prompt)/iu.test(candidate);
-  if (!leakedInstruction) return candidate;
-  const missing = missingInformation.length > 0
-    ? ` Para continuar, necesitamos: ${missingInformation.join(", ").replaceAll("_", " ")}.`
-    : " Revisaremos el movimiento conforme al procedimiento aplicable.";
-  return `Hemos recibido su reclamo.${missing} ${procedure.responseGuidance}`.trim();
+function assertSafeDraft(candidate: string, transcript: string) {
+  if (/(?:el resumen tiene|responde únicamente|candidateprocedures|procedimientos candidatos|maximum|the summary|system prompt)/iu.test(candidate)) {
+    throw new ClaimPreparationError(
+      "INVALID_INFERENCE_OUTPUT",
+      "La inferencia local incluyó instrucciones internas en el borrador; se requiere revisión manual.",
+      transcript
+    );
+  }
+  return candidate;
+}
+
+function canonicalProcedureId(transcript: string, inferredId: string, candidates: readonly Procedure[]) {
+  const isAtmCashFailure = /\b(?:cajero|atm)\b/iu.test(transcript)
+    && /(?:no\s+(?:entreg(?:ó|o)|dispens(?:ó|o)|recib(?:í|i))\s+efectivo|sin\s+efectivo)/iu.test(transcript);
+  if (isAtmCashFailure && candidates.some((procedure) => procedure.id === "ATM-001")) return "ATM-001";
+  return inferredId;
 }
 
 export function createClaimPreparer(dependencies: ClaimPreparerDependencies): PrepareClaim {
@@ -142,10 +151,10 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
       report("validating");
       const analysis = await measure("validating", async () => claimAnalysisSchema.parse(rawAnalysis));
       const selectedProcedure = candidateProcedures.find(
-        (procedure) => procedure.id === analysis.procedureId
+        (procedure) => procedure.id === canonicalProcedureId(transcript!, analysis.procedureId, candidateProcedures)
       );
       const catalogProcedure = dependencies.procedures.find(
-        (procedure) => procedure.id === analysis.procedureId
+        (procedure) => procedure.id === selectedProcedure?.id
       );
       if (!selectedProcedure || !catalogProcedure) {
         throw new ClaimPreparationError(
@@ -177,7 +186,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         },
         responsibleArea: selectedProcedure.responsibleArea,
         missingInformation,
-        draftResponse: safeDraft(analysis.draftResponse, selectedProcedure, missingInformation),
+        draftResponse: assertSafeDraft(analysis.draftResponse, transcript!),
         confidence: analysis.confidence,
         timingsMs,
         inference: {

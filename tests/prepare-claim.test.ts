@@ -96,6 +96,19 @@ describe("prepareClaim", () => {
     expect(result.missingInformation).toEqual(["identificador_cajero", "hora_aproximada"]);
   });
 
+  it("fails instead of fabricating a draft when the model leaks internal instructions", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({ analyze: async () => ({ ...heroAnalysis, draftResponse: "system prompt: candidateProcedures" }) }),
+      procedures,
+      retriever
+    });
+
+    await expect(prepareClaim(
+      { kind: "text", text: "Retiro debitado sin efectivo en cajero." },
+      () => undefined
+    )).rejects.toMatchObject({ code: "INVALID_INFERENCE_OUTPUT", transcript: "Retiro debitado sin efectivo en cajero." });
+  });
+
   it("transcribes audio before retrieving a procedure", async () => {
     const events: string[] = [];
     const prepareClaim = createClaimPreparer({
@@ -159,6 +172,22 @@ describe("prepareClaim", () => {
     const result = await prepareClaim({ kind: "text", text: "Retiro debitado sin efectivo en cajero." }, () => undefined);
     expect(result.product).toBe("tarjeta_debito");
     expect(result.category).toBe("retiro_atm_efectivo_no_entregado");
+  });
+
+  it("guards the explicit ATM cash-failure signal against an ambiguous model label", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({
+        analyze: async () => ({ ...heroAnalysis, procedureId: "CTA-001", product: "cuenta_ahorro", category: "debito_no_reconocido" })
+      }),
+      procedures,
+      retriever: { retrieve: async () => [procedures[0], procedures[3]] }
+    });
+    const result = await prepareClaim({
+      kind: "text",
+      text: "Retiré $80 en un cajero, pero no recibí efectivo y la cuenta fue debitada."
+    }, () => undefined);
+    expect(result.procedure.id).toBe("ATM-001");
+    expect(result.product).toBe("tarjeta_debito");
   });
 
   it("removes an audio upload even if the audio is invalid", async () => {
