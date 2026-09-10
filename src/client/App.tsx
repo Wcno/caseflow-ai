@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { ClaimRunSnapshot, ConfirmedClaim, PreparedClaim, Product } from "../shared/contracts";
 
 type Health = {
@@ -35,6 +36,24 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 function formatSeconds(ms: number) {
   return `${Math.floor(ms / 60)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+}
+
+type IconName = "dashboard" | "plus" | "history" | "shield" | "settings" | "bell" | "chevron" | "mic" | "upload" | "spark";
+
+function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  const paths: Record<IconName, ReactNode> = {
+    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>,
+    history: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5M12 7v5l3 2" /></>,
+    shield: <path d="M12 3 4.5 6v5.5c0 4.7 3.2 8 7.5 9.5 4.3-1.5 7.5-4.8 7.5-9.5V6L12 3Z" />,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.1 2.1-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56v.1h-3v-.1A1.7 1.7 0 0 0 10.7 18.6a1.7 1.7 0 0 0-1.88.34l-.06.06-2.1-2.1.06-.06A1.7 1.7 0 0 0 7.06 15a1.7 1.7 0 0 0-1.56-1.03h-.1v-3h.1A1.7 1.7 0 0 0 7.06 9.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.1-2.1.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56v-.1h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34L17.7 5.9l2.1 2.1-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.1v3h-.1A1.7 1.7 0 0 0 19.4 15Z" /></>,
+    bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    chevron: <path d="m9 18 6-6-6-6" />,
+    mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></>,
+    upload: <><path d="M12 16V4M8 8l4-4 4 4M5 20h14" /></>,
+    spark: <path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7L12 2Z" />
+  };
+  return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
 function EditableClaim({ value, catalog, onChange }: { value: PreparedClaim; catalog: readonly ProcedureOption[]; onChange: (next: PreparedClaim) => void }) {
@@ -125,27 +144,52 @@ export function App() {
   const submitDisabled = busy || !health?.ready || (!file && text.trim().length < 8);
   const diagnostic = useMemo(() => health?.models.join(" · ") ?? "Verificando QVAC…", [health]);
 
-  return <main>
-    <header><div className="brand"><span className="brand-mark">⌁</span><span>CaseFlow <b>AI</b></span></div><div className="local-pill"><span className={navigator.onLine ? "dot" : "dot offline"} /> {navigator.onLine ? "Modo local preparado" : "Sin Internet · local"}</div></header>
-    <section className="hero"><p className="eyebrow">OPERACIÓN INTERNA · DATOS SINTÉTICOS</p><h1>Convierte un reclamo en un expediente revisable.</h1><p>Transcripción, procedimiento, área responsable, faltantes y borrador: todo preparado localmente antes de enviarlo a revisión humana.</p><div className="metric"><strong>&lt; 2 min</strong><span>meta de preparación inicial<br />antes: ~15 min</span></div></section>
-    <section className="workspace">
-      <section className="intake-card"><div className="section-heading"><div><p className="eyebrow">01 · CAPTURA</p><h2>Nuevo reclamo</h2></div>{busy && <span className="timer">{formatSeconds(elapsedMs)}</span>}</div>
-        <label>Describe el reclamo<textarea aria-label="Texto del reclamo" placeholder="Pega o escribe lo que reportó el cliente…" value={text} onChange={(e) => { setText(e.target.value); setFile(undefined); }} disabled={busy} /></label>
-        <button className="text-link" onClick={() => { setText(example); setFile(undefined); }}>Cargar caso estrella de cajero</button>
-        <div className="or"><span />o<span /></div>
-        <div className="audio-actions"><button className={recording ? "record recording" : "record"} onClick={() => void toggleRecording()} disabled={busy}>{recording ? "Detener grabación" : "Grabar por micrófono"}</button><label className="upload">Cargar audio<input type="file" accept="audio/*" onChange={(e) => { setFile(e.target.files?.[0]); setText(""); }} disabled={busy} /></label></div>
-        {file && <p className="file-note">Audio listo: {file.name} · se eliminará después de transcribir.</p>}
-        <button className="primary" onClick={() => void submit()} disabled={submitDisabled}>{!health?.ready ? health?.progress ?? "Preparando modelos locales…" : busy ? stageLabel[run.status] : "Preparar expediente"}</button>
-        {message && <p className="error">{message}</p>}
+  return <div className="app-shell">
+    <aside className="sidebar" aria-label="Navegación principal">
+      <div className="side-brand"><span className="side-brand-mark"><Icon name="spark" size={20} /></span><span>CaseFlow <b>AI</b></span></div>
+      <p className="side-context">OPERACIÓN INTERNA</p>
+      <nav className="side-nav">
+        <a href="#inicio"><Icon name="dashboard" />Resumen</a>
+        <a className="active" href="#nuevo-reclamo"><Icon name="plus" />Nuevo reclamo</a>
+        <a href="#historial"><Icon name="history" />Expedientes<span>{history.length}</span></a>
+        <a href="#privacidad"><Icon name="shield" />Privacidad</a>
+        <a href="#footer"><Icon name="settings" />Configuración</a>
+      </nav>
+      <div className="side-security"><Icon name="shield" /><div><b>Datos protegidos</b><span>Procesamiento local</span></div></div>
+      <div className="side-bank">Experiencia inspirada en<br /><strong>Caja de Ahorros</strong><small>Marca CaseFlow · demo sintética</small></div>
+    </aside>
+    <main className="app-main" id="inicio">
+      <header className="topbar">
+        <div><p className="breadcrumb">Operaciones <Icon name="chevron" size={13} /> Reclamos</p><h1>Centro de reclamos</h1></div>
+        <div className="topbar-actions"><div className="local-pill"><span className={navigator.onLine ? "dot" : "dot offline"} /> {navigator.onLine ? "Entorno local seguro" : "Sin Internet · local"}</div><button className="icon-button" aria-label="Notificaciones"><Icon name="bell" /></button><div className="user-avatar" aria-label="Colaborador">CA</div></div>
+      </header>
+
+      <section className="welcome" aria-label="Visión general de CaseFlow">
+        <div><p className="eyebrow">RECLAMOS · DATOS SINTÉTICOS</p><h2>Prepara expedientes claros,<br /><em>en menos de dos minutos.</em></h2><p>Transcripción, procedimiento y borrador, listos para que un colaborador revise y confirme.</p></div>
+        <div className="metric"><span>Meta de preparación</span><strong>&lt; 2 min</strong><small>Antes: ~15 min por caso</small></div>
       </section>
-      <section className="result-pane">
-        {!run && <div className="empty"><span>⌁</span><h2>Esperando un reclamo</h2><p>El expediente aparecerá aquí para que puedas editarlo antes de confirmarlo.</p></div>}
-        {run && busy && <div className="progress"><p className="eyebrow">02 · PROCESAMIENTO LOCAL</p><h2>{stageLabel[run.status]}</h2><div className="progress-track"><i /></div><p>{formatSeconds(elapsedMs)} · El navegador consulta solo este servidor local.</p></div>}
-        {run?.status === "failed" && <div className="failure"><p className="eyebrow">REVISIÓN MANUAL</p><h2>No se generó un expediente automático.</h2><p>{run.error?.message}</p>{run.transcript && <label>Texto disponible<textarea value={run.transcript} readOnly /></label>}</div>}
-        {claim && run?.status === "ready" && <><EditableClaim value={claim} catalog={catalog} onChange={setClaim} /><button className="confirm" onClick={async () => { try { await api(`/api/runs/${run.id}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(claim) }); setMessage("Expediente confirmado y guardado solo en la base local."); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button></>}
+
+      <section className="workspace" id="nuevo-reclamo">
+        <section className="intake-card"><div className="section-heading"><div><p className="eyebrow">01 · CAPTURA</p><h2>Nuevo reclamo</h2><p className="section-copy">Ingresa el relato escrito o captura el audio del cliente.</p></div>{busy && <span className="timer">{formatSeconds(elapsedMs)}</span>}</div>
+          <label>Describe el reclamo<textarea aria-label="Texto del reclamo" placeholder="Pega o escribe lo que reportó el cliente…" value={text} onChange={(e) => { setText(e.target.value); setFile(undefined); }} disabled={busy} /></label>
+          <button className="text-link" onClick={() => { setText(example); setFile(undefined); }}><Icon name="spark" size={15} />Cargar caso estrella de cajero</button>
+          <div className="or"><span />o usa audio<span /></div>
+          <div className="audio-actions"><button className={recording ? "record recording" : "record"} onClick={() => void toggleRecording()} disabled={busy}><Icon name="mic" size={16} />{recording ? "Detener grabación" : "Grabar por micrófono"}</button><label className="upload"><Icon name="upload" size={16} />Cargar audio<input type="file" accept="audio/*" onChange={(e) => { setFile(e.target.files?.[0]); setText(""); }} disabled={busy} /></label></div>
+          {file && <p className="file-note">Audio listo: {file.name} · se eliminará después de transcribir.</p>}
+          <button className="primary" onClick={() => void submit()} disabled={submitDisabled}><Icon name="spark" size={17} />{!health?.ready ? health?.progress ?? "Preparando modelos locales…" : busy ? stageLabel[run.status] : "Preparar expediente"}</button>
+          {message && <p className="error">{message}</p>}
+        </section>
+        <section className="result-pane">
+          {!run && <div className="empty"><span className="empty-mark"><Icon name="spark" size={29} /></span><h2>Listo para preparar</h2><p>El expediente aparecerá aquí con los datos que debes revisar antes de confirmarlo.</p><div className="empty-list"><span>✓ Clasificación local</span><span>✓ Campos faltantes</span><span>✓ Borrador asistido</span></div></div>}
+          {run && busy && <div className="progress"><p className="eyebrow">02 · PROCESAMIENTO LOCAL</p><h2>{stageLabel[run.status]}</h2><div className="progress-track"><i /></div><p>{formatSeconds(elapsedMs)} · El navegador consulta solo este servidor local.</p></div>}
+          {run?.status === "failed" && <div className="failure"><p className="eyebrow">REVISIÓN MANUAL</p><h2>No se generó un expediente automático.</h2><p>{run.error?.message}</p>{run.transcript && <label>Texto disponible<textarea value={run.transcript} readOnly /></label>}</div>}
+          {claim && run?.status === "ready" && <><EditableClaim value={claim} catalog={catalog} onChange={setClaim} /><button className="confirm" onClick={async () => { try { await api(`/api/runs/${run.id}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(claim) }); setMessage("Expediente confirmado y guardado solo en la base local."); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button></>}
+        </section>
       </section>
-    </section>
-    <section className="diagnostics"><div><p className="eyebrow">PRIVACIDAD Y DIAGNÓSTICO</p><h2>La inferencia no sale del equipo.</h2><p>Proveedor: QVAC · ubicación: local · sin endpoint de inferencia externo.</p></div><dl><div><dt>Estado</dt><dd>{health?.state ?? "sin conexión"}</dd></div><div><dt>Dispositivo</dt><dd>{health?.device ?? "—"}</dd></div><div><dt>Modelos</dt><dd>{diagnostic}</dd></div></dl></section>
-    <section className="history"><div className="section-heading"><div><p className="eyebrow">HISTORIAL LOCAL</p><h2>Expedientes confirmados</h2></div>{history.length > 0 && <button className="danger-link" onClick={async () => { await api("/api/claims", { method: "DELETE" }); await refresh(); }}>Borrar todo</button>}</div>{history.length === 0 ? <p>No hay expedientes confirmados.</p> : <ul>{history.map((item) => <li key={item.id}><span><b>{item.procedure.id}</b> · {item.summary}</span><button className="danger-link" onClick={async () => { await api(`/api/claims/${item.id}`, { method: "DELETE" }); await refresh(); }}>Eliminar</button></li>)}</ul>}</section>
-  </main>;
+
+      <section className="diagnostics" id="privacidad"><div><p className="eyebrow">PRIVACIDAD Y DIAGNÓSTICO</p><h2>La inferencia no sale del equipo.</h2><p>Proveedor QVAC · ubicación local · sin endpoint de inferencia externo.</p></div><dl><div><dt>Estado</dt><dd>{health?.state ?? "sin conexión"}</dd></div><div><dt>Dispositivo</dt><dd>{health?.device ?? "—"}</dd></div><div><dt>Modelos</dt><dd>{diagnostic}</dd></div></dl></section>
+      <section className="history" id="historial"><div className="section-heading"><div><p className="eyebrow">HISTORIAL LOCAL</p><h2>Expedientes confirmados</h2></div>{history.length > 0 && <button className="danger-link" onClick={async () => { await api("/api/claims", { method: "DELETE" }); await refresh(); }}>Borrar todo</button>}</div>{history.length === 0 ? <p>No hay expedientes confirmados.</p> : <ul>{history.map((item) => <li key={item.id}><span><b>{item.procedure.id}</b> · {item.summary}</span><button className="danger-link" onClick={async () => { await api(`/api/claims/${item.id}`, { method: "DELETE" }); await refresh(); }}>Eliminar</button></li>)}</ul>}</section>
+      <footer className="app-footer" id="footer"><span>CaseFlow AI · Expedientes de reclamos</span><span>Demo con datos sintéticos · No conecta al core bancario</span><span>v0.1 · QVAC local</span></footer>
+    </main>
+  </div>;
 }

@@ -5,6 +5,7 @@ coverage/
 playwright-report/
 test-results/
 output/
+.playwright-cli/
 .qvac/
 data/*.db
 data/*.db-*
