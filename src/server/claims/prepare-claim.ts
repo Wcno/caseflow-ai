@@ -88,12 +88,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
       const catalogProcedure = dependencies.procedures.find(
         (procedure) => procedure.id === analysis.procedureId
       );
-      if (
-        !selectedProcedure ||
-        !catalogProcedure ||
-        selectedProcedure.product !== analysis.product ||
-        selectedProcedure.category !== analysis.category
-      ) {
+      if (!selectedProcedure || !catalogProcedure) {
         throw new ClaimPreparationError(
           "INVALID_INFERENCE_OUTPUT",
           "La inferencia seleccionó un procedimiento fuera del contexto recuperado.",
@@ -109,8 +104,9 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
 
       const result: PreparedClaim = {
         transcript,
-        product: analysis.product,
-        category: analysis.category,
+        // Procedure taxonomy is canonical; model product/category labels are redundant.
+        product: selectedProcedure.product,
+        category: selectedProcedure.category,
         extractedFields: analysis.extractedFields,
         summary: analysis.summary,
         procedure: {
@@ -146,4 +142,3 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
     }
   };
 }
-

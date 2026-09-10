@@ -9,6 +9,10 @@ type Health = {
   progress?: string;
   error?: string;
 };
+type ProcedureOption = {
+  id: string; product: Product; category: string; title: string; responsibleArea: string;
+  requiredFields: readonly string[]; steps: readonly string[]; illustrativeSla: string;
+};
 
 const example = "El 8 de septiembre retiré $80 en un cajero de Vía España. Mi cuenta fue debitada, pero el cajero no entregó efectivo. No recuerdo la hora exacta ni el identificador del cajero.";
 const stageLabel: Record<string, string> = {
@@ -33,14 +37,27 @@ function formatSeconds(ms: number) {
   return `${Math.floor(ms / 60)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 }
 
-function EditableClaim({ value, onChange }: { value: PreparedClaim; onChange: (next: PreparedClaim) => void }) {
+function EditableClaim({ value, catalog, onChange }: { value: PreparedClaim; catalog: readonly ProcedureOption[]; onChange: (next: PreparedClaim) => void }) {
   const set = <K extends keyof PreparedClaim>(key: K, next: PreparedClaim[K]) => onChange({ ...value, [key]: next });
+  const selectProcedure = (id: string) => {
+    const procedure = catalog.find((item) => item.id === id);
+    if (!procedure) return;
+    const missingInformation = procedure.requiredFields.filter((field) => !value.extractedFields[field]?.trim());
+    onChange({ ...value, product: procedure.product, category: procedure.category, responsibleArea: procedure.responsibleArea, missingInformation,
+      procedure: { id: procedure.id, title: procedure.title, source: `synthetic://procedures/${procedure.id}`, excerpt: `${procedure.steps.join(" ")} ${procedure.illustrativeSla}` } });
+  };
+  const setField = (field: string, fieldValue: string) => {
+    const extractedFields = { ...value.extractedFields, [field]: fieldValue };
+    const procedure = catalog.find((item) => item.id === value.procedure.id);
+    onChange({ ...value, extractedFields, missingInformation: procedure?.requiredFields.filter((required) => !extractedFields[required]?.trim()) ?? value.missingInformation });
+  };
   return <section className="result-card" aria-label="Expediente editable">
     <div className="result-title"><div><p className="eyebrow">Expediente preparado</p><h2>{value.procedure.title}</h2></div><span className="confidence">{Math.round(value.confidence * 100)}% confianza</span></div>
-    <div className="chip-row"><span className="chip">{productLabels[value.product]}</span><span className="chip">{value.responsibleArea}</span></div>
+    <div className="editor-grid"><label>Procedimiento<select aria-label="Procedimiento" value={value.procedure.id} onChange={(e) => selectProcedure(e.target.value)}>{catalog.map((procedure) => <option key={procedure.id} value={procedure.id}>{procedure.id} · {procedure.title}</option>)}</select></label><label>Producto<input aria-label="Producto" value={productLabels[value.product]} readOnly /></label><label>Categoría<input aria-label="Categoría" value={value.category} readOnly /></label><label>Área responsable<input aria-label="Área responsable" value={value.responsibleArea} readOnly /></label></div>
     <label>Transcripción<textarea value={value.transcript} onChange={(e) => set("transcript", e.target.value)} /></label>
     <label>Resumen<textarea value={value.summary} onChange={(e) => set("summary", e.target.value)} /></label>
     <div className="procedure"><strong>Procedimiento sintético · {value.procedure.id}</strong><p>{value.procedure.excerpt}</p><small>Fuente local: {value.procedure.source}</small></div>
+    <div className="extracted"><strong>Datos extraídos</strong><div className="editor-grid">{(catalog.find((procedure) => procedure.id === value.procedure.id)?.requiredFields ?? Object.keys(value.extractedFields)).map((field) => <label key={field}>{field.replaceAll("_", " ")}<input value={value.extractedFields[field] ?? ""} onChange={(event) => setField(field, event.target.value)} /></label>)}</div></div>
     <div className="missing"><strong>Información faltante</strong>{value.missingInformation.length === 0 ? <p>Todos los datos mínimos están presentes.</p> : <ul>{value.missingInformation.map((field) => <li key={field}>{field.replaceAll("_", " ")}</li>)}</ul>}</div>
     <label>Borrador de respuesta<textarea value={value.draftResponse} onChange={(e) => set("draftResponse", e.target.value)} /></label>
   </section>;
@@ -52,6 +69,7 @@ export function App() {
   const [run, setRun] = useState<ClaimRunSnapshot>();
   const [claim, setClaim] = useState<PreparedClaim>();
   const [health, setHealth] = useState<Health>();
+  const [catalog, setCatalog] = useState<ProcedureOption[]>([]);
   const [history, setHistory] = useState<ConfirmedClaim[]>([]);
   const [message, setMessage] = useState<string>();
   const [recording, setRecording] = useState(false);
@@ -60,8 +78,8 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [nextHealth, nextHistory] = await Promise.all([api<Health>("/api/health"), api<ConfirmedClaim[]>("/api/claims")]);
-      setHealth(nextHealth); setHistory(nextHistory);
+      const [nextHealth, nextHistory, nextCatalog] = await Promise.all([api<Health>("/api/health"), api<ConfirmedClaim[]>("/api/claims"), api<ProcedureOption[]>("/api/procedures")]);
+      setHealth(nextHealth); setHistory(nextHistory); setCatalog(nextCatalog);
     } catch { setHealth(undefined); }
   }, []);
   useEffect(() => { void refresh(); const id = window.setInterval(() => void refresh(), 4000); return () => clearInterval(id); }, [refresh]);
@@ -114,7 +132,7 @@ export function App() {
         {!run && <div className="empty"><span>⌁</span><h2>Esperando un reclamo</h2><p>El expediente aparecerá aquí para que puedas editarlo antes de confirmarlo.</p></div>}
         {run && busy && <div className="progress"><p className="eyebrow">02 · PROCESAMIENTO LOCAL</p><h2>{stageLabel[run.status]}</h2><div className="progress-track"><i /></div><p>{formatSeconds(run.elapsedMs)} · El navegador consulta solo este servidor local.</p></div>}
         {run?.status === "failed" && <div className="failure"><p className="eyebrow">REVISIÓN MANUAL</p><h2>No se generó un expediente automático.</h2><p>{run.error?.message}</p>{run.transcript && <label>Texto disponible<textarea value={run.transcript} readOnly /></label>}</div>}
-        {claim && run?.status === "ready" && <><EditableClaim value={claim} onChange={setClaim} /><button className="confirm" onClick={async () => { try { await api(`/api/runs/${run.id}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(claim) }); setMessage("Expediente confirmado y guardado solo en la base local."); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button></>}
+        {claim && run?.status === "ready" && <><EditableClaim value={claim} catalog={catalog} onChange={setClaim} /><button className="confirm" onClick={async () => { try { await api(`/api/runs/${run.id}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(claim) }); setMessage("Expediente confirmado y guardado solo en la base local."); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button></>}
       </section>
     </section>
     <section className="diagnostics"><div><p className="eyebrow">PRIVACIDAD Y DIAGNÓSTICO</p><h2>La inferencia no sale del equipo.</h2><p>Proveedor: QVAC · ubicación: local · sin endpoint de inferencia externo.</p></div><dl><div><dt>Estado</dt><dd>{health?.state ?? "sin conexión"}</dd></div><div><dt>Dispositivo</dt><dd>{health?.device ?? "—"}</dd></div><div><dt>Modelos</dt><dd>{diagnostic}</dd></div></dl></section>

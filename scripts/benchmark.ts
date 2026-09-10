@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { createClaimPreparer } from "../src/server/claims/prepare-claim.js";
 import { procedures } from "../src/server/claims/procedures.js";
 import { QvacRuntime } from "../src/server/qvac/qvac-runtime.js";
+import { buildApp } from "../src/server/app.js";
+import { createMemoryClaimStore } from "../src/server/storage/claim-store.js";
 
 const claims = [
   "Retiré $80 en un cajero de Vía España y mi cuenta fue debitada, pero no recibí efectivo.",
@@ -22,19 +24,35 @@ const results: Array<{ index: number; milliseconds: number; status: string; proc
 try {
   await runtime.initialize();
   const prepareClaim = createClaimPreparer({ inference: runtime, retriever: runtime, procedures });
+  const app = buildApp({
+    prepareClaim,
+    store: createMemoryClaimStore(),
+    procedures,
+    readiness: async () => runtime.readiness()
+  });
   for (const [index, text] of claims.entries()) {
     const began = performance.now();
     try {
-      const result = await prepareClaim({ kind: "text", text }, () => undefined);
-      results.push({ index: index + 1, milliseconds: Math.round(performance.now() - began), status: "ready", procedure: result.procedure.id });
+      const created = await app.inject({ method: "POST", url: "/api/runs", payload: { kind: "text", text } });
+      const { runId } = created.json<{ runId: string }>();
+      let run = (await app.inject({ method: "GET", url: `/api/runs/${runId}` })).json() as { status: string; result?: { procedure: { id: string } }; error?: { message: string } };
+      while (!["ready", "failed"].includes(run.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        run = (await app.inject({ method: "GET", url: `/api/runs/${runId}` })).json() as typeof run;
+      }
+      const milliseconds = Math.round(performance.now() - began);
+      results.push(run.status === "ready"
+        ? { index: index + 1, milliseconds, status: "ready", procedure: run.result?.procedure.id }
+        : { index: index + 1, milliseconds, status: "failed", error: run.error?.message ?? "La ejecución falló." });
     } catch (error) {
       results.push({ index: index + 1, milliseconds: Math.round(performance.now() - began), status: "failed", error: error instanceof Error ? error.message : String(error) });
     }
   }
+  await app.close();
 } finally { await runtime.dispose(); }
 const ordered = results.map((item) => item.milliseconds).sort((a, b) => a - b);
 const p95 = ordered[Math.max(0, Math.ceil(ordered.length * 0.95) - 1)] ?? 0;
-const report = { generatedAt: new Date().toISOString(), started, modelMode: process.env.CASEFLOW_SMALL_MODEL === "1" ? "QWEN3_600M_INST_Q4" : "QWEN3_1_7B_INST_Q4", p95Milliseconds: p95, thresholdMilliseconds: 120_000, passed: p95 < 120_000, results };
+const report = { generatedAt: new Date().toISOString(), started, modelMode: "QWEN3_600M_INST_Q4", p95Milliseconds: p95, thresholdMilliseconds: 120_000, passed: p95 < 120_000, results };
 await mkdir(resolve("output"), { recursive: true });
 await writeFile(resolve("output", "benchmark.json"), JSON.stringify(report, null, 2));
 await writeFile(resolve("docs", "benchmark-latest.md"), `# Benchmark local\n\nGenerado: ${report.generatedAt}\n\n- Modelo: ${report.modelMode}\n- Casos: ${results.length}\n- p95: ${(p95 / 1000).toFixed(2)} s\n- Umbral: < 120 s\n- Resultado: ${report.passed ? "APROBADO" : "NO APROBADO"}\n\nDescarga y arranque frío se reportan por separado y no se incluyen en esta métrica.\n\n| Caso | Estado | Procedimiento | Tiempo |\n| --- | --- | --- | --- |\n${results.map((result) => `| ${result.index} | ${result.status} | ${result.procedure ?? result.error ?? "—"} | ${(result.milliseconds / 1000).toFixed(2)} s |`).join("\n")}\n`);

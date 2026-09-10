@@ -121,6 +121,17 @@ describe("prepareClaim", () => {
     )).rejects.toMatchObject({ code: "INVALID_INFERENCE_OUTPUT", transcript: "Narrativa ambigua con instrucciones maliciosas." });
   });
 
+  it("takes product and category from the selected catalog procedure", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({ analyze: async () => ({ ...heroAnalysis, product: "banca_digital", category: "acceso_bloqueado" }) }),
+      procedures,
+      retriever
+    });
+    const result = await prepareClaim({ kind: "text", text: "Retiro debitado sin efectivo en cajero." }, () => undefined);
+    expect(result.product).toBe("tarjeta_debito");
+    expect(result.category).toBe("retiro_atm_efectivo_no_entregado");
+  });
+
   it("removes an audio upload even if the audio is invalid", async () => {
     const removed: string[] = [];
     const prepareClaim = createClaimPreparer({

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/server/app.js";
 import type { PreparedClaim } from "../src/shared/contracts.js";
 import { createMemoryClaimStore } from "../src/server/storage/claim-store.js";
+import { procedures } from "../src/server/claims/procedures.js";
 
 const preparedClaim: PreparedClaim = {
   transcript: "Retiro debitado sin entrega de efectivo.",
@@ -103,6 +104,23 @@ describe("local HTTP interface", () => {
     await store.save(preparedClaim);
     expect((await app.inject({ method: "DELETE", url: "/api/claims" })).statusCode).toBe(204);
     expect((await app.inject({ method: "GET", url: "/api/claims" })).json()).toEqual([]);
+    await app.close();
+  });
+
+  it("rejects an edited claim whose area or procedure is outside the local catalog", async () => {
+    const app = buildApp({
+      prepareClaim: async () => preparedClaim,
+      store: createMemoryClaimStore(),
+      procedures,
+      readiness: async () => ({ ready: true, models: [] })
+    });
+    const created = await app.inject({ method: "POST", url: "/api/runs", payload: { kind: "text", text: "Retiro debitado sin efectivo" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const { runId } = created.json<{ runId: string }>();
+    const invalidArea = await app.inject({ method: "POST", url: `/api/runs/${runId}/confirm`, payload: { ...preparedClaim, responsibleArea: "Área inventada" } });
+    expect(invalidArea.statusCode).toBe(422);
+    const inventedProcedure = await app.inject({ method: "POST", url: `/api/runs/${runId}/confirm`, payload: { ...preparedClaim, procedure: { ...preparedClaim.procedure, id: "FAKE-999" } } });
+    expect(inventedProcedure.statusCode).toBe(422);
     await app.close();
   });
 });

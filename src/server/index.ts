@@ -15,6 +15,7 @@ const prepareClaim = createClaimPreparer({ inference: runtime, retriever: runtim
 const app = buildApp({
   prepareClaim,
   store,
+  procedures,
   readiness: async () => runtime.readiness(),
   staticRoot: process.env.NODE_ENV === "production" ? resolve("dist") : undefined
 });

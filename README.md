@@ -15,14 +15,14 @@ La meta demostrable es reducir la preparación inicial de aproximadamente 15 min
 ## Flujo
 
 ```text
-Texto / voz → Parakeet (voz) → GTE Large + RAG local → Qwen + herramienta estructurada
+Texto / voz → Parakeet (voz) → GTE Large + RAG local → Qwen + JSON Schema estructurado
                                                      ↓
                     procedimiento citado + área + faltantes + borrador → revisión humana → SQLite local
 ```
 
-El módulo profundo es `createClaimPreparer(...)`, que expone la operación `prepareClaim(input, onProgress)` y encapsula transcripción, recuperación, inferencia, validación, temporales y errores. Sus estados observables son: `queued`, `transcribing`, `retrieving`, `analyzing`, `validating`, `ready` y `failed`.
+El módulo profundo es `createClaimPreparer(...)`, que expone la operación `prepareClaim(input, onProgress)` y encapsula transcripción, recuperación, inferencia, validación, temporales y errores. Sus estados observables son: `queued`, `transcribing`, `retrieving`, `analyzing`, `validating`, `ready` y `failed`. Qwen 600M usa `responseFormat: json_schema` de QVAC/llama.cpp para obtener una salida estructurada verificable; el intento real de tool call no fue fiable en este modelo, por lo que no se mantiene una herramienta falsa. La confianza se acepta como fracción 0–1 o porcentaje 0–100 y se normaliza determinísticamente a fracción.
 
-La salida se valida con Zod. El procedimiento debe estar entre los tres recuperados y dentro del catálogo local; el área se toma exclusivamente del catálogo; los faltantes se calculan determinísticamente a partir de `requiredFields`. Una salida inválida falla sin fabricar valores y conserva la transcripción para revisión manual.
+La salida se valida con Zod. El procedimiento debe estar entre los tres recuperados y dentro del catálogo local; producto, categoría y área se toman exclusivamente del procedimiento canónico; los faltantes se calculan determinísticamente a partir de `requiredFields`. Una salida inválida falla sin fabricar valores y conserva la transcripción para revisión manual.
 
 ## Modelos QVAC
 
@@ -30,8 +30,8 @@ La salida se valida con Zod. El procedimiento debe estar entre los tres recupera
 | --- | --- |
 | Voz en español | `PARAKEET_TDT_0_6B_V3_Q8_0` |
 | Recuperación RAG | `GTE_LARGE_FP16` |
-| Extracción estructurada | `QWEN3_1_7B_INST_Q4` |
-| Contingencia documentada | `QWEN3_600M_INST_Q4` mediante `CASEFLOW_SMALL_MODEL=1` |
+| Extracción estructurada | `QWEN3_600M_INST_Q4` |
+| Evaluado y descartado | `QWEN3_1_7B_INST_Q4`: superó 110 s en la Intel UHD de la demo |
 
 QVAC y sus modelos se distribuyen bajo sus licencias respectivas; el SDK instalado declara Apache-2.0. Consultar las condiciones de cada modelo antes de uso productivo. La investigación concreta de integración está en [docs/research/qvac-sdk-0.19.md](docs/research/qvac-sdk-0.19.md).
 
@@ -66,7 +66,7 @@ npm run build
 npm run benchmark
 ```
 
-El benchmark ejecuta 10 reclamos sintéticos con modelos ya precargados y genera `output/benchmark.json` (no versionado) y `docs/benchmark-latest.md`. La aceptación es `p95 < 120 s` desde el envío del texto o final de audio hasta `ready`; descarga y arranque frío quedan fuera de esa cifra. Si el modelo de 1.7B supera 110 s o agota memoria, repetir **todas** las pruebas y el benchmark con `CASEFLOW_SMALL_MODEL=1`; no hay selección dinámica durante la demo.
+El benchmark ejecuta 10 reclamos sintéticos con modelos ya precargados mediante `POST /api/runs` y polling hasta `ready`; genera `output/benchmark.json` (no versionado) y `docs/benchmark-latest.md`. La aceptación es `p95 < 120 s` desde el envío del texto o final de audio hasta `ready`; descarga y arranque frío quedan fuera de esa cifra. El modelo de 1.7B superó 110 s en la máquina de demo, por lo que el MVP queda fijado en 600M y se repite toda la batería; no hay selección dinámica durante la demo.
 
 El recorrido de Playwright usa un adaptador determinista aislado en `scripts/e2e-server.ts`; el servidor de producción siempre usa `QvacRuntime`. En desarrollo local Playwright usa Chrome instalado si el navegador gestionado aún no se ha descargado.
 

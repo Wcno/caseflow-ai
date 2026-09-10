@@ -14,12 +14,14 @@ import {
   type IntakeInput
 } from "../shared/contracts.js";
 import type { PrepareClaim } from "./claims/prepare-claim.js";
+import type { Procedure } from "./claims/procedures.js";
 import type { ClaimStore } from "./storage/claim-store.js";
 
 interface AppDependencies {
   prepareClaim: PrepareClaim;
   store: ClaimStore;
   readiness: () => Promise<{ ready: boolean; models: readonly string[]; error?: string }>;
+  procedures?: readonly Procedure[];
   staticRoot?: string;
 }
 
@@ -108,10 +110,32 @@ export function buildApp(dependencies: AppDependencies) {
       return reply.code(409).send({ error: "El expediente todavía no está listo." });
     }
     const editedClaim = preparedClaimSchema.parse(request.body);
-    return reply.code(201).send(await dependencies.store.save(editedClaim));
+    const catalogProcedure = dependencies.procedures?.find((procedure) => procedure.id === editedClaim.procedure.id);
+    if (dependencies.procedures && !catalogProcedure) {
+      return reply.code(422).send({ error: "El procedimiento confirmado no existe en el catálogo local." });
+    }
+    if (catalogProcedure && (
+      editedClaim.product !== catalogProcedure.product ||
+      editedClaim.category !== catalogProcedure.category ||
+      editedClaim.responsibleArea !== catalogProcedure.responsibleArea
+    )) {
+      return reply.code(422).send({ error: "Producto, categoría y área deben corresponder al procedimiento seleccionado." });
+    }
+    const normalizedClaim = catalogProcedure ? {
+      ...editedClaim,
+      procedure: {
+        id: catalogProcedure.id,
+        title: catalogProcedure.title,
+        source: `synthetic://procedures/${catalogProcedure.id}`,
+        excerpt: `${catalogProcedure.steps.join(" ")} ${catalogProcedure.illustrativeSla}`
+      },
+      missingInformation: catalogProcedure.requiredFields.filter((field) => !editedClaim.extractedFields[field]?.trim())
+    } : editedClaim;
+    return reply.code(201).send(await dependencies.store.save(normalizedClaim));
   });
 
   app.get("/api/claims", async () => dependencies.store.list());
+  app.get("/api/procedures", async () => dependencies.procedures ?? []);
   app.delete<{ Params: { id: string } }>("/api/claims/:id", async (request, reply) => {
     const deleted = await dependencies.store.delete(request.params.id);
     return deleted ? reply.code(204).send() : reply.code(404).send({ error: "Expediente no encontrado." });
@@ -124,4 +148,3 @@ export function buildApp(dependencies: AppDependencies) {
   app.addHook("onClose", async () => dependencies.store.close());
   return app;
 }
-
