@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-server/
 coverage/
 playwright-report/
 test-results/
@@ -7,9 +8,10 @@ output/
 .qvac/
 data/*.db
 data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
 tmp/
 *.log
 .env
 .env.*
 !.env.example
-
