@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
 
+test("navegación y diseño se mantienen utilizables en tablet y móvil", async ({ page }) => {
+  for (const viewport of [{ width: 900, height: 840 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: "Resumen" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Nuevo reclamo" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Expedientes" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Privacidad" })).toBeVisible();
+    expect(await page.locator("body").evaluate((body) => body.scrollWidth <= body.clientWidth)).toBe(true);
+  }
+  await page.getByRole("link", { name: "Privacidad" }).click();
+  await expect(page.getByRole("heading", { name: "La inferencia no sale del equipo." })).toBeInViewport();
+});
+
 test("caso ATM: edición, confirmación e historial local", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Cargar caso estrella de cajero" }).click();

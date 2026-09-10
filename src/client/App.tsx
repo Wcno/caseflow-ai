@@ -38,7 +38,7 @@ function formatSeconds(ms: number) {
   return `${Math.floor(ms / 60)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 }
 
-type IconName = "dashboard" | "plus" | "history" | "shield" | "settings" | "bell" | "chevron" | "mic" | "upload" | "spark";
+type IconName = "dashboard" | "plus" | "history" | "shield" | "chevron" | "mic" | "upload" | "spark";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -46,8 +46,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     plus: <><path d="M12 5v14M5 12h14" /></>,
     history: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5M12 7v5l3 2" /></>,
     shield: <path d="M12 3 4.5 6v5.5c0 4.7 3.2 8 7.5 9.5 4.3-1.5 7.5-4.8 7.5-9.5V6L12 3Z" />,
-    settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.1 2.1-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56v.1h-3v-.1A1.7 1.7 0 0 0 10.7 18.6a1.7 1.7 0 0 0-1.88.34l-.06.06-2.1-2.1.06-.06A1.7 1.7 0 0 0 7.06 15a1.7 1.7 0 0 0-1.56-1.03h-.1v-3h.1A1.7 1.7 0 0 0 7.06 9.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.1-2.1.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56v-.1h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34L17.7 5.9l2.1 2.1-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.1v3h-.1A1.7 1.7 0 0 0 19.4 15Z" /></>,
-    bell: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
     chevron: <path d="m9 18 6-6-6-6" />,
     mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></>,
     upload: <><path d="M12 16V4M8 8l4-4 4 4M5 20h14" /></>,
@@ -153,15 +151,14 @@ export function App() {
         <a className="active" href="#nuevo-reclamo"><Icon name="plus" />Nuevo reclamo</a>
         <a href="#historial"><Icon name="history" />Expedientes<span>{history.length}</span></a>
         <a href="#privacidad"><Icon name="shield" />Privacidad</a>
-        <a href="#footer"><Icon name="settings" />Configuración</a>
       </nav>
-      <div className="side-security"><Icon name="shield" /><div><b>Datos protegidos</b><span>Procesamiento local</span></div></div>
+      <div className="side-security"><Icon name="shield" /><div><b>Inferencia local</b><span>Sin salida a servicios de IA</span></div></div>
       <div className="side-bank">Experiencia inspirada en<br /><strong>Caja de Ahorros</strong><small>Marca CaseFlow · demo sintética</small></div>
     </aside>
     <main className="app-main" id="inicio">
       <header className="topbar">
         <div><p className="breadcrumb">Operaciones <Icon name="chevron" size={13} /> Reclamos</p><h1>Centro de reclamos</h1></div>
-        <div className="topbar-actions"><div className="local-pill"><span className={navigator.onLine ? "dot" : "dot offline"} /> {navigator.onLine ? "Entorno local seguro" : "Sin Internet · local"}</div><button className="icon-button" aria-label="Notificaciones"><Icon name="bell" /></button><div className="user-avatar" aria-label="Colaborador">CA</div></div>
+        <div className="topbar-actions"><div className="local-pill"><span className={health?.ready ? "dot" : "dot offline"} /> {health?.ready ? "Inferencia local disponible" : health?.progress ?? "Preparando inferencia local"}</div><div className="user-avatar" aria-label="Colaborador">CA</div></div>
       </header>
 
       <section className="welcome" aria-label="Visión general de CaseFlow">
