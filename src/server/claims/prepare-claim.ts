@@ -81,6 +81,15 @@ function evidenceFields(transcript: string, requiredFields: readonly string[], p
   }));
 }
 
+function safeDraft(candidate: string, procedure: Procedure, missingInformation: readonly string[]) {
+  const leakedInstruction = /(?:el resumen tiene|responde únicamente|candidateprocedures|procedimientos candidatos|maximum|the summary|system prompt)/iu.test(candidate);
+  if (!leakedInstruction) return candidate;
+  const missing = missingInformation.length > 0
+    ? ` Para continuar, necesitamos: ${missingInformation.join(", ").replaceAll("_", " ")}.`
+    : " Revisaremos el movimiento conforme al procedimiento aplicable.";
+  return `Hemos recibido su reclamo.${missing} ${procedure.responseGuidance}`.trim();
+}
+
 export function createClaimPreparer(dependencies: ClaimPreparerDependencies): PrepareClaim {
   const now = dependencies.now ?? Date.now;
   const removeAudio = dependencies.removeAudio ?? ((path) => rm(path, { force: true }));
@@ -168,7 +177,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         },
         responsibleArea: selectedProcedure.responsibleArea,
         missingInformation,
-        draftResponse: analysis.draftResponse,
+        draftResponse: safeDraft(analysis.draftResponse, selectedProcedure, missingInformation),
         confidence: analysis.confidence,
         timingsMs,
         inference: {

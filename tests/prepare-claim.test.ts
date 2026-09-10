@@ -67,6 +67,35 @@ describe("prepareClaim", () => {
     expect(stages).toEqual(["retrieving", "analyzing", "validating", "ready"]);
   });
 
+  it("does not treat echoed field names or values absent from the narrative as evidence", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({
+        analyze: async () => ({
+          ...heroAnalysis,
+          extractedFields: {
+            amount: "amount",
+            date: "desconocido",
+            location: "Vía España",
+            identificador_cajero: "ATM-999",
+            hora_aproximada: "hora_aproximada"
+          }
+        })
+      }),
+      procedures,
+      retriever
+    });
+
+    const result = await prepareClaim({
+      kind: "text",
+      text: "El 9 de septiembre retiré B/.120.00 en un cajero de Vía España. La cuenta fue debitada, pero no recibí efectivo."
+    }, () => undefined);
+
+    expect(result.extractedFields).toMatchObject({ amount: "B/.120.00", date: "9 de septiembre", location: "Vía España" });
+    expect(result.extractedFields.identificador_cajero).toBe("");
+    expect(result.extractedFields.hora_aproximada).toBe("");
+    expect(result.missingInformation).toEqual(["identificador_cajero", "hora_aproximada"]);
+  });
+
   it("transcribes audio before retrieving a procedure", async () => {
     const events: string[] = [];
     const prepareClaim = createClaimPreparer({
