@@ -301,9 +301,8 @@ describe("prepareClaim", () => {
         kind: "text",
         text: "Retiré B/.80.00 en un cajero; la cuenta fue debitada, pero no recibí efectivo."
       }, () => undefined)).resolves.toMatchObject({
-        kind: "not_applicable",
-        guidance: "No se encontró un procedimiento.",
-        transcript: "Retiré B/.80.00 en un cajero; la cuenta fue debitada, pero no recibí efectivo."
+        procedure: { id: "ATM-001" },
+        responsibleArea: "Operaciones de Cajeros y Disputas"
       });
     });
   });
