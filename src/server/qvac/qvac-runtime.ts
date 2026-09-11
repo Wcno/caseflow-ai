@@ -152,7 +152,11 @@ export class QvacRuntime implements InferenceGateway, ProcedureRetriever {
     try {
       const resources = await getSystemResources();
       const gpus = resources.capabilities.gpus;
-      const firstGpu = gpus.status === "supported" ? gpus.value[0] : undefined;
+      const availableGpus = gpus.status === "supported" ? gpus.value : [];
+      const firstGpu = availableGpus.find((gpu) => {
+        const name = gpu.name.status === "supported" ? gpu.name.value : "";
+        return /nvidia|geforce|rtx|quadro/i.test(name);
+      }) ?? availableGpus[0];
       const gpuName = firstGpu?.name.status === "supported" ? firstGpu.name.value : undefined;
       this.device = gpuName ? `GPU local: ${gpuName}` : "CPU local";
     } catch {
