@@ -1,29 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ClaimRunSnapshot, ConfirmedClaim, PreparedClaim, Product } from "../shared/contracts";
+import type { CaseStatus, ClaimRunSnapshot, CustomerReference, CustomerTrackingView, OperationalCase, PreparedClaim, Product, Specialist } from "../shared/contracts";
 
-type Health = {
-  ready: boolean;
-  state: string;
-  models: readonly string[];
-  device?: string;
-  progress?: string;
-  error?: string;
-};
-type ProcedureOption = {
-  id: string; product: Product; category: string; title: string; responsibleArea: string;
-  requiredFields: readonly string[]; steps: readonly string[]; illustrativeSla: string;
-};
+type Health = { ready: boolean; state?: string; models: readonly string[]; device?: string; progress?: string; error?: string };
+type ProcedureOption = { id: string; version: string; product: Product; category: string; title: string; responsibleArea: string; requiredFields: readonly string[]; steps: readonly string[]; illustrativeSla: string; responseGuidance: string; exampleNarrative: string; searchText: string };
+type View = "home" | "new" | "cases" | "procedures" | "tracking" | "privacy";
+type IconName = "home" | "plus" | "files" | "book" | "search" | "shield" | "spark" | "mic" | "upload" | "arrow" | "user" | "clock" | "message";
 
-const example = "El 8 de septiembre retiré $80 en un cajero de Vía España. Mi cuenta fue debitada, pero el cajero no entregó efectivo. No recuerdo la hora exacta ni el identificador del cajero.";
-const stageLabel: Record<string, string> = {
-  queued: "En cola", transcribing: "Transcribiendo localmente", retrieving: "Consultando procedimientos",
-  analyzing: "Analizando el reclamo", validating: "Validando expediente", ready: "Listo para revisión", failed: "Revisión manual requerida"
+const heroNarrative = "El 8 de septiembre retiré B/.80.00 en un cajero de Vía España. Mi cuenta fue debitada, pero el cajero no entregó efectivo. No recuerdo la hora exacta ni el identificador del cajero.";
+const operator = { role: "operator" as const, name: "María Operadora" };
+const statusLabels: Record<CaseStatus, string> = {
+  received: "Recibido", preparing: "En preparación", pending_assignment: "Pendiente de asignación", assigned: "Asignado",
+  investigating: "En investigación", waiting_customer: "Pendiente del cliente", resolved: "Resuelto", closed: "Cerrado", cancelled: "Cancelado"
 };
-const productLabels: Record<Product, string> = {
-  tarjeta_debito: "Tarjeta de débito", cuenta_ahorro: "Cuenta de ahorro",
-  transferencia: "Transferencia", banca_digital: "Banca digital"
-};
+const stageLabels: Record<string, string> = { queued: "En cola", transcribing: "Transcribiendo localmente", retrieving: "Consultando procedimientos", analyzing: "Analizando el reclamo", validating: "Validando expediente", ready: "Listo para revisión", not_applicable: "Reclamo no aplicable", needs_clarification: "Necesita aclaración", failed: "Revisión manual requerida" };
+const terminalStages = new Set(["ready", "not_applicable", "needs_clarification", "failed"]);
+const productLabels: Record<Product, string> = { tarjeta_debito: "Tarjeta de débito", cuenta_ahorro: "Cuenta de ahorro", transferencia: "Transferencia", banca_digital: "Banca digital" };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -33,160 +25,147 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   }
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
-
-function formatSeconds(ms: number) {
-  return `${Math.floor(ms / 60)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
-}
-
-type IconName = "dashboard" | "plus" | "history" | "shield" | "chevron" | "mic" | "upload" | "spark";
+const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const fmt = (value?: string) => value ? new Intl.DateTimeFormat("es-PA", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
+const mask = (value: string) => value.length > 4 ? `•••• ${value.replace(/\D/g, "").slice(-4)}` : value || "Pendiente";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
-    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-    plus: <><path d="M12 5v14M5 12h14" /></>,
-    history: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5M12 7v5l3 2" /></>,
-    shield: <path d="M12 3 4.5 6v5.5c0 4.7 3.2 8 7.5 9.5 4.3-1.5 7.5-4.8 7.5-9.5V6L12 3Z" />,
-    chevron: <path d="m9 18 6-6-6-6" />,
-    mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></>,
-    upload: <><path d="M12 16V4M8 8l4-4 4 4M5 20h14" /></>,
-    spark: <path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7L12 2Z" />
+    home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
+    plus: <><path d="M12 5v14M5 12h14" /></>, files: <><path d="M5 3h10l4 4v14H5z" /><path d="M15 3v5h5M8 13h8M8 17h8" /></>,
+    book: <><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22z" /><path d="M20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22z" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5" /></>, shield: <path d="M12 3 4.5 6v5.5c0 4.7 3.2 8 7.5 9.5 4.3-1.5 7.5-4.8 7.5-9.5V6z" />,
+    spark: <path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z" />, mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
+    upload: <><path d="M12 16V4M8 8l4-4 4 4M5 20h14" /></>, arrow: <path d="m9 18 6-6-6-6" />, user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>, message: <path d="M4 4h16v13H8l-4 4z" />
   };
   return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+function StatusBadge({ status }: { status: CaseStatus }) { return <span className={`status status-${status}`}>{statusLabels[status]}</span>; }
+
 function EditableClaim({ value, catalog, onChange }: { value: PreparedClaim; catalog: readonly ProcedureOption[]; onChange: (next: PreparedClaim) => void }) {
   const set = <K extends keyof PreparedClaim>(key: K, next: PreparedClaim[K]) => onChange({ ...value, [key]: next });
   const selectProcedure = (id: string) => {
-    const procedure = catalog.find((item) => item.id === id);
-    if (!procedure) return;
-    const missingInformation = procedure.requiredFields.filter((field) => !value.extractedFields[field]?.trim());
-    onChange({ ...value, product: procedure.product, category: procedure.category, responsibleArea: procedure.responsibleArea, missingInformation,
-      procedure: { id: procedure.id, title: procedure.title, source: `synthetic://procedures/${procedure.id}`, excerpt: `${procedure.steps.join(" ")} ${procedure.illustrativeSla}` } });
+    const procedure = catalog.find((item) => item.id === id); if (!procedure) return;
+    onChange({ ...value, product: procedure.product, category: procedure.category, responsibleArea: procedure.responsibleArea,
+      missingInformation: procedure.requiredFields.filter((field) => !value.extractedFields[field]?.trim()),
+      procedure: { id, title: procedure.title, source: `synthetic://procedures/${id}`, excerpt: `${procedure.steps.join(" ")} ${procedure.illustrativeSla}` } });
   };
-  const setField = (field: string, fieldValue: string) => {
-    const extractedFields = { ...value.extractedFields, [field]: fieldValue };
-    const procedure = catalog.find((item) => item.id === value.procedure.id);
-    onChange({ ...value, extractedFields, missingInformation: procedure?.requiredFields.filter((required) => !extractedFields[required]?.trim()) ?? value.missingInformation });
+  const setField = (field: string, nextValue: string) => {
+    const extractedFields = { ...value.extractedFields, [field]: nextValue };
+    const required = catalog.find((item) => item.id === value.procedure.id)?.requiredFields ?? [];
+    onChange({ ...value, extractedFields, missingInformation: required.filter((item) => !extractedFields[item]?.trim()) });
   };
-  return <section className="result-card" aria-label="Expediente editable">
-    <div className="result-title"><div><p className="eyebrow">Expediente preparado</p><h2>{value.procedure.title}</h2></div><span className="confidence">{Math.round(value.confidence * 100)}% confianza</span></div>
-    <div className="editor-grid"><label>Procedimiento<select aria-label="Procedimiento" value={value.procedure.id} onChange={(e) => selectProcedure(e.target.value)}>{catalog.map((procedure) => <option key={procedure.id} value={procedure.id}>{procedure.id} · {procedure.title}</option>)}</select></label><label>Producto<input aria-label="Producto" value={productLabels[value.product]} readOnly /></label><label>Categoría<input aria-label="Categoría" value={value.category} readOnly /></label><label>Área responsable<input aria-label="Área responsable" value={value.responsibleArea} readOnly /></label></div>
-    <label>Transcripción<textarea value={value.transcript} onChange={(e) => set("transcript", e.target.value)} /></label>
-    <label>Resumen<textarea aria-label="Resumen" value={value.summary} onChange={(e) => set("summary", e.target.value)} /></label>
-    <div className="procedure"><strong>Procedimiento sintético · {value.procedure.id}</strong><p>{value.procedure.excerpt}</p><small>Fuente local: {value.procedure.source}</small></div>
-    <div className="extracted"><strong>Datos extraídos</strong><div className="editor-grid">{(catalog.find((procedure) => procedure.id === value.procedure.id)?.requiredFields ?? Object.keys(value.extractedFields)).map((field) => <label key={field}>{field.replaceAll("_", " ")}<input value={value.extractedFields[field] ?? ""} onChange={(event) => setField(field, event.target.value)} /></label>)}</div></div>
-    <div className="missing"><strong>Información faltante</strong>{value.missingInformation.length === 0 ? <p>Todos los datos mínimos están presentes.</p> : <ul>{value.missingInformation.map((field) => <li key={field}>{field.replaceAll("_", " ")}</li>)}</ul>}</div>
-    <label>Borrador de respuesta<textarea aria-label="Borrador de respuesta" value={value.draftResponse} onChange={(e) => set("draftResponse", e.target.value)} /></label>
+  const current = catalog.find((item) => item.id === value.procedure.id);
+   return <section className="card result-card" aria-label="Expediente editable"><CustomerCandidateBanner claim={value} />
+    <div className="split"><div><p className="eyebrow">EXPEDIENTE PREPARADO</p><h2>{value.procedure.title}</h2></div><span className="confidence">{Math.round(value.confidence * 100)}% confianza</span></div>
+    <div className="form-grid"><label>Procedimiento<select aria-label="Procedimiento" value={value.procedure.id} onChange={(event) => selectProcedure(event.target.value)}>{catalog.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.title}</option>)}</select></label><label>Producto<input value={productLabels[value.product]} readOnly /></label><label>Categoría<input value={value.category.replaceAll("_", " ")} readOnly /></label><label>Área responsable<input aria-label="Área responsable" value={value.responsibleArea} readOnly /></label></div>
+    <label>Transcripción<textarea value={value.transcript} onChange={(event) => set("transcript", event.target.value)} /></label>
+    <label>Resumen<textarea aria-label="Resumen" value={value.summary} onChange={(event) => set("summary", event.target.value)} /></label>
+    <div className="callout"><b>Procedimiento sintético · {value.procedure.id}</b><p>{value.procedure.excerpt}</p><small>{value.procedure.source}</small></div>
+    <h3>Datos del incidente extraídos</h3><div className="form-grid">{(current?.requiredFields ?? Object.keys(value.extractedFields)).map((field) => <label key={field}>{field.replaceAll("_", " ")}<input value={value.extractedFields[field] ?? ""} onChange={(event) => setField(field, event.target.value)} /></label>)}</div>
+    <div className="warning"><b>Información faltante</b><p>{value.missingInformation.length ? value.missingInformation.map((item) => item.replaceAll("_", " ")).join(" · ") : "Todos los datos del procedimiento están presentes."}</p></div>
+    <label>Borrador de respuesta<textarea value={value.draftResponse} onChange={(event) => set("draftResponse", event.target.value)} /></label>
   </section>;
 }
 
+function Dashboard({ cases, navigate }: { cases: readonly OperationalCase[]; navigate: (view: View) => void }) {
+  const active = cases.filter((item) => !item.archived && !["closed", "cancelled"].includes(item.status));
+  return <><section className="hero"><div><p className="eyebrow">OPERACIÓN LOCAL · DATOS SINTÉTICOS</p><h1>Reclamos claros,<br /><em>seguimiento visible.</em></h1><p>Prepara, asigna y acompaña cada expediente desde una sola experiencia local.</p><button className="primary compact" onClick={() => navigate("new")}><Icon name="plus" />Registrar reclamo</button></div><div className="hero-card"><span>Meta de preparación</span><strong>&lt; 2 min</strong><small>QVAC en este dispositivo</small></div></section>
+    <section className="metrics"><article><span>Expedientes activos</span><b>{active.length}</b><small>sin archivados</small></article><article><span>Esperando cliente</span><b>{cases.filter((item) => item.status === "waiting_customer").length}</b><small>requieren información</small></article><article><span>Resueltos o cerrados</span><b>{cases.filter((item) => ["resolved", "closed"].includes(item.status)).length}</b><small>demo local</small></article><article><span>Procedimiento</span><b>12</b><small>versiones sintéticas</small></article></section>
+    <section className="card"><div className="split"><div><p className="eyebrow">ACTIVIDAD RECIENTE</p><h2>Últimos expedientes</h2></div><button className="link-button" onClick={() => navigate("cases")}>Ver bandeja <Icon name="arrow" /></button></div><div className="case-list compact-list">{cases.slice(0, 5).map((item) => <article key={item.id}><div><b>{item.trackingNumber}</b><span>{item.customer.fullName}</span></div><StatusBadge status={item.status} /><small>{fmt(item.lastUpdatedAt)}</small></article>)}</div></section></>;
+}
+
+function NewClaim({ health, catalog, initialText = "", initialCase, onSaved }: { health?: Health; catalog: readonly ProcedureOption[]; initialText?: string; initialCase?: OperationalCase; onSaved: (value: OperationalCase) => Promise<void> }) {
+  const [customer, setCustomer] = useState<CustomerReference>(initialCase?.customer ?? { fullName: "", nationalId: "", customerNumber: "", intakeChannel: "phone", preferredContact: "phone" });
+  const [text, setText] = useState(initialText); const [file, setFile] = useState<File>(); const [run, setRun] = useState<ClaimRunSnapshot>(); const [claim, setClaim] = useState<PreparedClaim>();
+  const [tracking, setTracking] = useState(initialCase?.trackingNumber ?? ""); const [confirmed, setConfirmed] = useState<OperationalCase>(); const [message, setMessage] = useState(""); const [recording, setRecording] = useState(false);
+  const [activeCaseId, setActiveCaseId] = useState(initialCase?.id ?? "");
+  const recorder = useRef<MediaRecorder | undefined>(undefined); const chunks = useRef<Blob[]>([]); const onSavedRef = useRef(onSaved);
+  const busy = !!run && !terminalStages.has(run.status);
+  useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
+  useEffect(() => { if (!run || !busy) return; const id = window.setInterval(async () => { try { const next = await api<ClaimRunSnapshot>(`/api/runs/${run.id}`); setRun(next); if (next.result) setClaim(next.result); if (next.caseId && terminalStages.has(next.status) && next.status !== "failed") { const updated = await api<OperationalCase>(`/api/cases/${next.caseId}`); await onSavedRef.current(updated); } } catch (error) { setMessage(error instanceof Error ? error.message : "La preparación se interrumpió."); } }, 400); return () => clearInterval(id); }, [run?.id, busy]);
+   useEffect(() => { const candidate = claim?.customerReferenceCandidate; if (!candidate) return; setCustomer((current) => { const next = { ...current, fullName: current.fullName.trim() ? current.fullName : candidate.fullName, nationalId: current.nationalId.trim() ? current.nationalId : candidate.nationalId, customerNumber: current.customerNumber.trim() ? current.customerNumber : candidate.customerNumber }; setClaim((currentClaim) => currentClaim && (currentClaim.customerReferenceCandidate?.fullName !== next.fullName || currentClaim.customerReferenceCandidate?.nationalId !== next.nationalId || currentClaim.customerReferenceCandidate?.customerNumber !== next.customerNumber) ? { ...currentClaim, customerReferenceCandidate: { fullName: next.fullName, nationalId: next.nationalId, customerNumber: next.customerNumber } } : currentClaim); return next; }); }, [claim?.customerReferenceCandidate]);
+   const setCustomerField = <K extends keyof CustomerReference>(key: K, value: CustomerReference[K]) => { setCustomer((current) => ({ ...current, [key]: value })); setClaim((current) => current ? { ...current, customerReferenceCandidate: { fullName: current.customerReferenceCandidate?.fullName ?? "", nationalId: current.customerReferenceCandidate?.nationalId ?? "", customerNumber: current.customerReferenceCandidate?.customerNumber ?? "", ...(key === "fullName" || key === "nationalId" || key === "customerNumber" ? { [key]: value } : {}) } } : current); };
+   const submit = async () => { setMessage(""); setClaim(undefined); setConfirmed(undefined); try {
+    const reception = activeCaseId
+      ? await api<OperationalCase>(`/api/cases/${activeCaseId}`)
+      : await api<OperationalCase>("/api/cases", json({ customer: { ...customer, fullName: customer.fullName.trim() || "Cliente por confirmar" }, narrative: text || `Audio sintético recibido: ${file?.name}` }));
+    if (!activeCaseId) { setActiveCaseId(reception.id); await onSaved(reception); }
+    setTracking(reception.trackingNumber); let started: { runId: string };
+    if (file) { const data = new FormData(); data.append("file", file); started = await api(`/api/runs?caseId=${encodeURIComponent(reception.id)}`, { method: "POST", body: data }); }
+    else started = await api("/api/runs", json({ kind: "text", text, caseId: reception.id }));
+    setRun({ id: started.runId, caseId: reception.id, trackingNumber: reception.trackingNumber, status: "queued", elapsedMs: 0, transcript: text || undefined });
+  } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo registrar el reclamo."); } };
+  const record = async () => { if (recording && recorder.current) { recorder.current.stop(); return; } try { const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const next = new MediaRecorder(stream); chunks.current = []; next.ondataavailable = (event) => chunks.current.push(event.data); next.onstop = () => { const blob = new Blob(chunks.current, { type: next.mimeType || "audio/webm" }); setFile(new File([blob], "reclamo-sintetico.webm", { type: blob.type })); stream.getTracks().forEach((track) => track.stop()); setRecording(false); }; recorder.current = next; next.start(); setRecording(true); } catch { setMessage("No se pudo acceder al micrófono; carga un audio o usa texto."); } };
+  return <><section className="page-heading"><p className="eyebrow">NUEVO RECLAMO</p><h1>Registra la recepción antes de preparar.</h1><p>El número de seguimiento nace de inmediato; la identidad se confirma como metadata y no se infiere del relato.</p></section>
+    {tracking && <div className="ticket-banner"><Icon name="spark" /><div><span>Número de seguimiento emitido</span><b>{tracking}</b><small>Compártelo con el cliente en la simulación.</small></div>{confirmed && <StatusBadge status={confirmed.status} />}</div>}
+    <section className="intake-layout"><section className="card"><p className="step">01 · REFERENCIA DEL CLIENTE</p><div className="form-grid"><label>Nombre completo<input aria-label="Nombre completo" value={customer.fullName} onChange={(event) => setCustomerField("fullName", event.target.value)} placeholder="Puede quedar por confirmar" /></label><label>Cédula<input aria-label="Cédula" value={customer.nationalId} onChange={(event) => setCustomerField("nationalId", event.target.value)} placeholder="Dato sintético" /><small className="field-help">Necesaria para que el cliente consulte con los últimos 4 dígitos.</small></label><label>Número de cliente<input aria-label="Número de cliente" value={customer.customerNumber} onChange={(event) => setCustomerField("customerNumber", event.target.value)} placeholder="CLI-00000" /></label><label>Canal de recepción<select value={customer.intakeChannel} onChange={(event) => setCustomerField("intakeChannel", event.target.value as CustomerReference["intakeChannel"])}><option value="phone">Llamada</option><option value="whatsapp">WhatsApp simulado</option><option value="branch">Sucursal</option><option value="web">Web local</option></select></label></div>
+      <label>Contacto preferido<select value={customer.preferredContact} onChange={(event) => setCustomerField("preferredContact", event.target.value as CustomerReference["preferredContact"])}><option value="phone">Llamada</option><option value="whatsapp">WhatsApp simulado</option><option value="none">Sin contacto definido</option></select></label><p className="step top-gap">02 · RELATO</p><label>Texto del reclamo<textarea aria-label="Texto del reclamo" value={text} onChange={(event) => { setText(event.target.value); setFile(undefined); setRun(undefined); setClaim(undefined); }} placeholder="Escribe lo reportado por el cliente…" /></label><button className="link-button" onClick={() => { setText(heroNarrative); setFile(undefined); setRun(undefined); setClaim(undefined); }}><Icon name="spark" />Cargar caso estrella de cajero</button><div className="divider">o usa audio</div><div className="row"><button className="secondary" onClick={() => void record()}><Icon name="mic" />{recording ? "Detener grabación" : "Grabar"}</button><label className="secondary upload"><Icon name="upload" />Cargar audio<input aria-label="Cargar audio" type="file" accept="audio/*" onChange={(event) => { setFile(event.target.files?.[0]); setText(""); setRun(undefined); setClaim(undefined); }} /></label></div>
+      {recording && <div className="audio-banner recording" role="status" aria-live="polite"><span className="recording-dot" /><div><b>Grabación en curso</b><small>Pulsa “Detener grabación” cuando termines de describir el reclamo.</small></div></div>}
+      {file && !run && <div className="audio-banner" role="status" aria-live="polite"><Icon name="mic" /><div><b>Audio listo para transcribir</b><span>{file.name}</span><small>Se procesará localmente y el archivo temporal se eliminará al terminar.</small></div></div>}
+       <div className="identity-assist" role="note"><Icon name="spark" /><span>QVAC intentará detectar nombre, cédula y número de cliente en el relato. Revisa y confirma la sugerencia antes de asignar.</span></div><button className="primary" disabled={busy || !health?.ready || (!file && text.trim().length < 8)} onClick={() => void submit()}><Icon name="spark" />{busy ? stageLabels[run.status] : "Registrar y preparar"}</button>{message && <p className="error">{message}</p>}</section>
+      <section>{!run && <div className="card empty"><Icon name="files" size={36} /><h2>Esperando una recepción</h2><p>El expediente revisable aparecerá aquí después del procesamiento local.</p></div>}{run && busy && <div className="card empty"><span className="spinner" /><h2>{stageLabels[run.status]}</h2><p>QVAC procesa el relato sin enviarlo fuera del equipo.</p></div>}{run?.status === "not_applicable" && <div className="card disposition"><p className="eyebrow">VALIDACIÓN DEL RELATO</p><h2>Este relato no corresponde a un reclamo aplicable</h2><p>{run.disposition?.guidance ?? "El relato no describe un reclamo cubierto por el catálogo local."}</p><div className="help-box"><b>¿Qué puedes hacer?</b><ul><li>Confirma que el reporte trate sobre un producto u operación bancaria.</li><li>Evita registrar opiniones, insultos o asuntos ajenos como expedientes.</li><li>Corrige el relato y vuelve a intentarlo si se omitió el problema bancario.</li></ul></div>{run.transcript && <TranscriptBanner transcript={run.transcript} />}</div>}{run?.status === "needs_clarification" && <div className="card disposition clarification"><p className="eyebrow">FALTA INFORMACIÓN</p><h2>Necesitamos aclarar el reclamo</h2><p>{run.disposition?.guidance ?? "El relato no tiene suficiente información para seleccionar un procedimiento."}</p><div className="help-box"><b>Pregunta al cliente por:</b><ul><li>el producto o canal bancario afectado;</li><li>la operación que intentaba realizar;</li><li>qué ocurrió, cuándo ocurrió y qué resultado esperaba.</li></ul></div>{run.transcript && <TranscriptBanner transcript={run.transcript} />}</div>}{run?.status === "failed" && <div className="card empty"><h2>Revisión manual requerida</h2><p>{run.error?.message}</p></div>}{claim && run?.status === "ready" && <>{file && <TranscriptBanner transcript={claim.transcript} />}<EditableClaim value={claim} catalog={catalog} onChange={setClaim} />{!confirmed && <button className="primary" onClick={async () => { try { const saved = await api<OperationalCase>(`/api/runs/${run.id}/confirm`, json(claim)); setConfirmed(saved); await onSaved(saved); setMessage("Expediente confirmado y listo para asignación."); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button>}</>}</section></section></>;
+  }
+
+  function TranscriptBanner({ transcript }: { transcript: string }) {
+    return <div className="transcript-banner" role="status" aria-live="polite"><Icon name="message" /><div><b>Transcripción local completada</b><p>{transcript}</p><small>Revísala antes de confirmar el expediente.</small></div></div>;
+  }
+
+function CustomerCandidateBanner({ claim }: { claim: PreparedClaim }) {
+  const candidate = claim.customerReferenceCandidate;
+  if (!candidate || !Object.values(candidate).some((value) => value.trim())) return null;
+  return <div className="customer-candidate" role="status" aria-live="polite"><div className="customer-candidate-icon"><Icon name="user" /></div><div><b>Datos de cliente detectados localmente</b><p>QVAC encontró valores explícitos en el relato. Confírmalos en la referencia del cliente antes de asignar.</p><div className="candidate-tags">{candidate.fullName && <span>Nombre · {candidate.fullName}</span>}{candidate.nationalId && <span>Cédula · {candidate.nationalId}</span>}{candidate.customerNumber && <span>Cliente · {candidate.customerNumber}</span>}</div></div></div>;
+}
+
+function CasesPage({ cases, openCase }: { cases: readonly OperationalCase[]; openCase: (id: string) => void }) {
+  const [search, setSearch] = useState(""); const [status, setStatus] = useState(""); const [scope, setScope] = useState<"all" | "mine">("all"); const [archived, setArchived] = useState(false); const [assignee, setAssignee] = useState("");
+  const areas = [...new Set(cases.map((item) => item.responsibleArea).filter(Boolean))] as string[]; const [area, setArea] = useState("");
+  const visible = cases.filter((item) => item.archived === archived).filter((item) => !status || item.status === status).filter((item) => !area || item.responsibleArea === area).filter((item) => !assignee || item.assignee?.name === assignee).filter((item) => scope === "all" || item.assignee?.name === "Carlos Méndez").filter((item) => `${item.trackingNumber} ${item.customer.fullName} ${item.customer.customerNumber}`.toLowerCase().includes(search.toLowerCase()));
+  return <><section className="page-heading"><p className="eyebrow">BANDEJA OPERATIVA</p><h1>Expedientes</h1><p>Consulta estado, área, persona responsable y última actividad.</p></section><section className="card filters"><div className="segmented"><button className={scope === "all" ? "selected" : ""} onClick={() => setScope("all")}>Todos</button><button className={scope === "mine" ? "selected" : ""} onClick={() => setScope("mine")}>Mis expedientes</button></div><label className="search-field"><Icon name="search" /><input aria-label="Buscar expedientes" placeholder="Buscar por seguimiento o cliente" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="Filtrar por estado" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Todos los estados</option>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><select aria-label="Filtrar por área" value={area} onChange={(event) => setArea(event.target.value)}><option value="">Todas las áreas</option>{areas.map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Filtrar por persona" value={assignee} onChange={(event) => setAssignee(event.target.value)}><option value="">Todas las personas</option>{[...new Set(cases.map((item) => item.assignee?.name).filter(Boolean))].map((item) => <option key={item} value={item}>{item}</option>)}</select><label className="check"><input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} />Archivados</label></section>
+    <section className="card table-card"><div className="table-head"><span>Seguimiento / cliente</span><span>Estado</span><span>Área / responsable</span><span>Registro</span><span>Actualización</span><span /></div><div className="case-list">{visible.map((item) => <article key={item.id}><div><b>{item.trackingNumber}</b><span>{item.customer.fullName} · {mask(item.customer.nationalId)}</span></div><StatusBadge status={item.status} /><div><span>{item.responsibleArea ?? item.preparedClaim?.responsibleArea ?? "Por confirmar"}</span><small>{item.assignee?.name ?? "Sin especialista"}</small></div><small>{fmt(item.receivedAt)}</small><small>{fmt(item.lastUpdatedAt)}</small><button className="icon-action" aria-label={`Abrir ${item.trackingNumber}`} onClick={() => openCase(item.id)}><Icon name="arrow" /></button></article>)}{visible.length === 0 && <div className="empty-row">No hay expedientes para estos filtros.</div>}</div></section></>;
+}
+
+function CaseDetail({ value, catalog, specialists, update, back, resumeIntake }: { value: OperationalCase; catalog: readonly ProcedureOption[]; specialists: readonly Specialist[]; update: (next: OperationalCase) => void; back: () => void; resumeIntake: (value: OperationalCase) => void }) {
+  const [tab, setTab] = useState("Resumen"); const [assigneeId, setAssigneeId] = useState(""); const [note, setNote] = useState(""); const [message, setMessage] = useState(value.resolution?.customerResponse ?? ""); const [error, setError] = useState(""); const [customerEdit, setCustomerEdit] = useState(value.customer); const [correctionReason, setCorrectionReason] = useState("");
+  const procedure = catalog.find((item) => item.id === value.preparedClaim?.procedure.id); const eligible = specialists.filter((item) => item.area === (value.preparedClaim?.responsibleArea ?? value.responsibleArea));
+  const [resolution, setResolution] = useState({ investigationSummary: "", resolution: "", customerResponse: "", evidence: "", checks: (procedure?.steps ?? []).map((step) => ({ step, completed: false, result: "" })) });
+  const command = async (body: unknown) => { setError(""); try { const next = await api<OperationalCase>(`/api/cases/${value.id}/commands`, json(body)); if (next.resolution?.customerResponse) setMessage(next.resolution.customerResponse); update(next); } catch (caught) { setError(caught instanceof Error ? caught.message : "No se pudo actualizar."); } };
+  const actor = { role: "specialist" as const, name: value.assignee?.name ?? "Especialista sintético" };
+  const overdue = !!value.targetAt && new Date(value.targetAt).getTime() < Date.now() && !["resolved", "closed", "cancelled"].includes(value.status);
+  return <><button className="back" onClick={back}>← Volver a expedientes</button><section className="detail-header"><div><p className="eyebrow">{value.trackingNumber}</p><h1>{value.preparedClaim?.procedure.title ?? "Recepción pendiente de preparar"}</h1><p>{value.customer.fullName} · registrado {fmt(value.receivedAt)}</p></div><StatusBadge status={value.status} /></section>
+    <nav className="tabs">{["Resumen", "Cliente", "Procedimiento", "Investigación", "Comunicación", "Historial"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>
+    <section className="detail-grid"><div className="card detail-content">
+      {tab === "Resumen" && <><div className="summary-grid"><div><span>Fecha de registro</span><b>{fmt(value.receivedAt)}</b></div><div><span>Fecha del incidente</span><b>{value.incidentAt ?? "Por confirmar"}</b></div><div><span>Área responsable</span><b>{value.responsibleArea ?? value.preparedClaim?.responsibleArea ?? "Por confirmar"}</b></div><div><span>Especialista</span><b>{value.assignee?.name ?? "Sin asignar"}</b></div><div><span>Objetivo sintético</span><b>{fmt(value.targetAt)} {overdue && <em className="overdue">Atrasado · demo</em>}</b></div><div><span>Última actualización</span><b>{fmt(value.lastUpdatedAt)}</b></div></div><h3>Resumen preparado</h3><p>{value.preparedClaim?.summary ?? value.narrative}</p></>}
+      {tab === "Cliente" && <><div className="form-grid"><label>Nombre completo<input value={customerEdit.fullName} onChange={(event) => setCustomerEdit({ ...customerEdit, fullName: event.target.value })} /></label><label>Cédula sintética<input value={customerEdit.nationalId} onChange={(event) => setCustomerEdit({ ...customerEdit, nationalId: event.target.value })} /></label><label>Número de cliente<input value={customerEdit.customerNumber} onChange={(event) => setCustomerEdit({ ...customerEdit, customerNumber: event.target.value })} /></label><label>Contacto preferido<select value={customerEdit.preferredContact} onChange={(event) => setCustomerEdit({ ...customerEdit, preferredContact: event.target.value as CustomerReference["preferredContact"] })}><option value="phone">Llamada</option><option value="whatsapp">WhatsApp simulado</option><option value="none">Sin contacto</option></select></label></div>{value.confirmedAt && <label>Motivo de la corrección<input value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Obligatorio después de confirmar" /></label>}<button className="primary compact" onClick={() => void command({ type: "update_customer", actor: operator, customer: customerEdit, reason: correctionReason || undefined })}>Guardar referencia del cliente</button></>}
+      {tab === "Procedimiento" && <>{procedure ? <><p className="eyebrow">{procedure.id} · VERSIÓN SINTÉTICA</p><h2>{procedure.title}</h2><p>{procedure.illustrativeSla}</p><ol className="steps">{procedure.steps.map((step) => <li key={step}>{step}</li>)}</ol><div className="callout"><b>Guía de respuesta</b><p>{procedure.responseGuidance}</p></div></> : <p>El procedimiento aún no ha sido confirmado.</p>}</>}
+      {tab === "Investigación" && <><h2>Espacio del especialista</h2>{value.status === "assigned" && <button className="primary compact" onClick={() => void command({ type: "transition", status: "investigating", actor })}>Iniciar investigación</button>}{value.status === "waiting_customer" && value.assignee && <button className="primary compact" onClick={() => void command({ type: "transition", status: "investigating", actor })}>Retomar investigación</button>}{value.status === "waiting_customer" && !value.assignee && <div className="callout"><b>Aclaración pendiente</b><p>Completa el relato en recepción antes de asignar este expediente.</p></div>}{value.status === "investigating" && <><div className="checklist">{resolution.checks.map((item, index) => <div key={item.step}><label className="check"><input type="checkbox" checked={item.completed} onChange={(event) => setResolution((current) => ({ ...current, checks: current.checks.map((check, i) => i === index ? { ...check, completed: event.target.checked } : check) }))} />{item.step}</label><input aria-label={`Resultado ${index + 1}`} placeholder="Resultado del paso" value={item.result} onChange={(event) => setResolution((current) => ({ ...current, checks: current.checks.map((check, i) => i === index ? { ...check, result: event.target.value } : check) }))} /></div>)}</div><label>Resumen de investigación<textarea value={resolution.investigationSummary} onChange={(event) => setResolution({ ...resolution, investigationSummary: event.target.value })} /></label><label>Resolución<textarea value={resolution.resolution} onChange={(event) => setResolution({ ...resolution, resolution: event.target.value })} /></label><label>Respuesta final al cliente<textarea value={resolution.customerResponse} onChange={(event) => setResolution({ ...resolution, customerResponse: event.target.value })} /></label><label>Referencia de evidencia sintética<input value={resolution.evidence} onChange={(event) => setResolution({ ...resolution, evidence: event.target.value })} /></label><div className="row"><button className="secondary" onClick={() => void command({ type: "transition", status: "waiting_customer", actor })}>Solicitar información</button><button className="primary compact" onClick={() => void command({ type: "resolve", actor, checklist: resolution.checks, investigationSummary: resolution.investigationSummary, resolution: resolution.resolution, customerResponse: resolution.customerResponse, evidence: [resolution.evidence] })}>Confirmar resolución</button></div></>}{value.resolution && <div className="resolution-box"><b>Resolución confirmada</b><p>{value.resolution.resolution}</p><small>{value.resolution.investigationSummary}</small></div>}</>}
+      {tab === "Comunicación" && <><h2>Comunicación simulada</h2><p className="muted">La vista previa permanece en este equipo; no se conecta con WhatsApp ni telefonía.</p>{value.status === "resolved" && <><label>Mensaje<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label><button className="primary compact" onClick={() => void command({ type: "communicate", actor: operator, channel: value.customer.preferredContact === "whatsapp" ? "whatsapp" : "phone", message, delivered: true })}>Registrar entrega y cerrar</button></>}{value.communications?.map((item) => <div className="communication" key={item.id}><Icon name="message" /><div><b>{item.channel} · entrega simulada</b><p>{item.message}</p><small>{fmt(item.at)}</small></div></div>)}</>}
+      {tab === "Historial" && <div className="timeline">{value.history.slice().reverse().map((event) => <article key={event.id}><i /><div><b>{event.description}</b><span>{event.actor.name} · {event.actor.role === "operator" ? "Operador" : "Especialista"}</span>{event.reason && <em>Motivo: {event.reason}</em>}<small>{fmt(event.at)}</small></div></article>)}</div>}
+    </div><aside className="card action-panel"><h3>Acciones</h3>{value.status === "waiting_customer" && !value.preparedClaim && !value.assignee && <button className="primary compact" onClick={() => resumeIntake(value)}>Completar aclaración</button>}{value.assignee && <p className="role-note"><Icon name="user" />Vista del especialista: <b>{value.assignee.name}</b></p>}{value.status === "pending_assignment" && <><label>Especialista<select aria-label="Especialista" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}><option value="">Seleccionar…</option>{eligible.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="primary" disabled={!assigneeId} onClick={() => void command({ type: "assign", area: value.preparedClaim?.responsibleArea, assigneeId, actor: operator })}>Asignar expediente</button></>}{value.assignee && ["assigned", "investigating", "waiting_customer"].includes(value.status) && <><label>Reasignar especialista<select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}><option value="">Seleccionar…</option>{eligible.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="secondary" disabled={!assigneeId} onClick={() => { const reason = window.prompt("Motivo de la reasignación"); if (reason) void command({ type: "assign", area: value.responsibleArea, assigneeId, actor: operator, reason }); }}>Reasignar</button></>}{!["received", "preparing", "pending_assignment"].includes(value.status) && <><label>Nota interna<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Comentario visible en historial" /></label><button className="secondary" disabled={note.trim().length < 3} onClick={() => { void command({ type: "add_note", actor: value.assignee ? actor : operator, text: note }); setNote(""); }}>Agregar nota</button></>}{value.status === "closed" && <button className="secondary exception" onClick={() => { const reason = window.prompt("Motivo de la reapertura"); if (reason) void command({ type: "transition", status: "investigating", actor: operator, reason }); }}>Reabrir expediente</button>}{["pending_assignment", "assigned"].includes(value.status) && <button className="secondary exception" onClick={() => { const reason = window.prompt("Motivo para devolver a preparación"); if (reason) void command({ type: "transition", status: "preparing", actor: operator, reason }); }}>Devolver a preparación</button>}{!["closed", "cancelled"].includes(value.status) && <button className="danger-link" onClick={() => { const reason = window.prompt("Motivo de la cancelación"); if (reason) void command({ type: "transition", status: "cancelled", actor: operator, reason }); }}>Cancelar expediente</button>}<button className="danger-link" onClick={() => { const reason = window.prompt("Motivo para archivar este expediente"); if (reason) void command({ type: "archive", actor: operator, reason }); }}>Archivar expediente</button>{error && <p className="error">{error}</p>}</aside></section></>;
+}
+
+function ProceduresPage({ catalog, useExample }: { catalog: readonly ProcedureOption[]; useExample: (procedure: ProcedureOption) => void }) {
+  const [query, setQuery] = useState(""); const [product, setProduct] = useState(""); const [category, setCategory] = useState(""); const [selected, setSelected] = useState<ProcedureOption>();
+  const visible = catalog.filter((item) => !product || item.product === product).filter((item) => !category || item.category === category).filter((item) => `${item.id} ${item.title} ${item.searchText}`.toLowerCase().includes(query.toLowerCase()));
+  return <><section className="page-heading"><p className="eyebrow">DOCUMENTACIÓN LOCAL</p><h1>Biblioteca de procedimientos</h1><p>12 guías sintéticas versionadas para orientar la preparación y resolución.</p></section><section className="operator-guide card"><div><p className="eyebrow">AYUDA RÁPIDA</p><h2>Flujo recomendado para el operador</h2></div><ol><li>Registra nombre, cédula y canal para emitir seguimiento.</li><li>Describe o transcribe el reclamo antes de preparar.</li><li>Si no aplica o falta contexto, corrige el relato sin crear otro ticket.</li><li>Confirma el expediente, asigna especialista y documenta la resolución.</li></ol></section><section className="card filters"><label className="search-field"><Icon name="search" /><input placeholder="Buscar problema o procedimiento" value={query} onChange={(event) => setQuery(event.target.value)} /></label><select aria-label="Filtrar procedimientos por producto" value={product} onChange={(event) => setProduct(event.target.value)}><option value="">Todos los productos</option>{Object.entries(productLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><select aria-label="Filtrar procedimientos por categoría" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas las categorías</option>{catalog.filter((item) => !product || item.product === product).map((item) => <option key={item.category} value={item.category}>{item.category.replaceAll("_", " ")}</option>)}</select></section><section className="procedure-grid">{visible.map((item) => <article className="card procedure-card" key={item.id}><div className="split"><span className="procedure-id">{item.id}</span><small>Versión sintética {item.version}</small></div><h2>{item.title}</h2><p>{item.responsibleArea}</p><div className="tag-row"><span>{productLabels[item.product]}</span><span>{item.illustrativeSla}</span></div><div className="row"><button className="secondary" onClick={() => setSelected(selected?.id === item.id ? undefined : item)}>Ver procedimiento</button><button className="link-button" onClick={() => useExample(item)}>Probar caso sintético</button></div>{selected?.id === item.id && <div className="procedure-detail"><h3>Campos requeridos</h3><p>{item.requiredFields.join(" · ")}</p><h3>Ejemplo sintético</h3><p>{item.exampleNarrative}</p><h3>Pasos</h3><ol>{item.steps.map((step) => <li key={step}>{step}</li>)}</ol><h3>Guía de respuesta</h3><p>{item.responseGuidance}</p></div>}</article>)}</section></>;
+}
+
+function TrackingPage() { const [trackingNumber, setTrackingNumber] = useState(""); const [last4, setLast4] = useState(""); const [result, setResult] = useState<CustomerTrackingView>(); const [error, setError] = useState(""); return <><section className="page-heading centered"><p className="eyebrow">VISTA DEL CLIENTE · SIMULACIÓN LOCAL</p><h1>Consulta tu reclamo</h1><p>Usa el número recibido y los últimos cuatro dígitos de la cédula sintética.</p></section><section className="tracking-card card"><label>Número de seguimiento<input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value.toUpperCase())} placeholder="CF-2026-000123" /></label><label>Últimos cuatro dígitos<input value={last4} maxLength={4} onChange={(event) => setLast4(event.target.value.replace(/\D/g, ""))} placeholder="0000" /></label><button className="link-button" onClick={() => { setTrackingNumber("CF-2026-000108"); setLast4("1008"); }}>Usar ejemplo cerrado</button><button className="primary" onClick={async () => { setError(""); setResult(undefined); try { setResult(await api<CustomerTrackingView>("/api/tracking", json({ trackingNumber, nationalIdLast4: last4 }))); } catch { setError("No encontramos un reclamo con los datos proporcionados."); } }}>Consultar estado</button>{error && <p className="error">{error}</p>}</section>{result && <section className="tracking-result card"><div className="split"><div><p className="eyebrow">{result.trackingNumber}</p><h2>{result.category.replaceAll("_", " ")}</h2></div><span className="customer-status">{result.status}</span></div><div className="progress-line"><i /></div><div className="summary-grid"><div><span>Registrado</span><b>{fmt(result.receivedAt)}</b></div><div><span>Última actualización</span><b>{fmt(result.lastUpdatedAt)}</b></div><div><span>Área responsable</span><b>{result.responsibleArea ?? "En evaluación"}</b></div><div><span>Información requerida</span><b>{result.requiredInformation.length ? result.requiredInformation.join(", ") : "Ninguna"}</b></div></div>{result.customerResponse && <div className="resolution-box"><b>Respuesta para ti</b><p>{result.customerResponse}</p></div>}<p className="privacy-note"><Icon name="shield" />Esta vista no revela notas internas, evidencia ni la identidad del especialista.</p></section>}</>; }
+
+function PrivacyPage({ health }: { health?: Health }) { return <><section className="page-heading"><p className="eyebrow">PRIVACIDAD VERIFICABLE</p><h1>La inferencia no sale del equipo</h1><p>CaseFlow está diseñado para una demostración local-first con datos exclusivamente sintéticos.</p></section><section className="privacy-grid"><article className="card"><Icon name="shield" size={30} /><h2>QVAC local</h2><p>Transcripción, recuperación y generación se ejecutan dentro del proceso Node local. No existe fallback de IA en la nube.</p></article><article className="card"><Icon name="mic" size={30} /><h2>Audio temporal</h2><p>El audio se convierte y transcribe localmente; el archivo temporal se elimina incluso cuando la preparación falla.</p></article><article className="card"><Icon name="files" size={30} /><h2>Persistencia limitada</h2><p>Los expedientes operativos confirmados permanecen en SQLite local. No se conectan con un core bancario.</p></article><article className="card"><Icon name="message" size={30} /><h2>Comunicación simulada</h2><p>Las vistas previas de WhatsApp y llamada no se transmiten a proveedores externos.</p></article></section><section className="diagnostic card"><div><p className="eyebrow">DIAGNÓSTICO DEL DISPOSITIVO</p><h2>{health?.ready ? "Inferencia local disponible" : "Preparando inferencia local"}</h2></div><dl><div><dt>Estado</dt><dd>{health?.state ?? health?.progress ?? "Sin conexión"}</dd></div><div><dt>Dispositivo</dt><dd>{health?.device ?? "No reportado"}</dd></div><div><dt>Modelos</dt><dd>{health?.models?.join(" · ") || "Verificando…"}</dd></div></dl></section><div className="scope-note"><b>Alcance de seguridad</b><p>Esta demo no implementa autenticación bancaria, permisos productivos, cifrado administrado por la institución ni auditoría regulatoria. No introduzcas datos reales.</p></div></>; }
+
 export function App() {
-  const [text, setText] = useState("");
-  const [file, setFile] = useState<File>();
-  const [run, setRun] = useState<ClaimRunSnapshot>();
-  const [claim, setClaim] = useState<PreparedClaim>();
-  const [health, setHealth] = useState<Health>();
-  const [catalog, setCatalog] = useState<ProcedureOption[]>([]);
-  const [history, setHistory] = useState<ConfirmedClaim[]>([]);
-  const [message, setMessage] = useState<string>();
-  const [recording, setRecording] = useState(false);
-  const [clockNow, setClockNow] = useState(() => Date.now());
-  const recorder = useRef<MediaRecorder | undefined>(undefined);
-  const chunks = useRef<Blob[]>([]);
-  const startedAt = useRef<number | undefined>(undefined);
-
-  const refresh = useCallback(async () => {
-    try {
-      const [nextHealth, nextHistory, nextCatalog] = await Promise.all([api<Health>("/api/health"), api<ConfirmedClaim[]>("/api/claims"), api<ProcedureOption[]>("/api/procedures")]);
-      setHealth(nextHealth); setHistory(nextHistory); setCatalog(nextCatalog);
-    } catch { setHealth(undefined); }
-  }, []);
-  useEffect(() => { void refresh(); const id = window.setInterval(() => void refresh(), 4000); return () => clearInterval(id); }, [refresh]);
-  useEffect(() => {
-    if (!run || ["ready", "failed"].includes(run.status)) return;
-    const id = window.setInterval(async () => {
-      try { const next = await api<ClaimRunSnapshot>(`/api/runs/${run.id}`); setRun(next); if (next.result) setClaim(next.result); } catch (error) { setMessage(error instanceof Error ? error.message : "La ejecución se interrumpió."); }
-    }, 500);
-    return () => clearInterval(id);
-  }, [run?.id, run?.status]);
-
-  useEffect(() => {
-    if (!run || ["ready", "failed"].includes(run.status)) return;
-    const id = window.setInterval(() => setClockNow(Date.now()), 250);
-    return () => clearInterval(id);
-  }, [run?.id, run?.status]);
-
-  const busy = !!run && !["ready", "failed"].includes(run.status);
-  const elapsedMs = run ? Math.max(run.elapsedMs, startedAt.current ? clockNow - startedAt.current : run.elapsedMs) : 0;
-  const submit = async () => {
-    setMessage(undefined); setClaim(undefined); setRun(undefined);
-    try {
-      let response: { runId: string };
-      if (file) { const data = new FormData(); data.append("file", file); response = await api("/api/runs", { method: "POST", body: data }); }
-      else response = await api("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "text", text }) });
-      startedAt.current = Date.now(); setClockNow(startedAt.current);
-      setRun({ id: response.runId, status: "queued", elapsedMs: 0, transcript: text || undefined });
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo iniciar el reclamo."); }
-  };
-  const toggleRecording = async () => {
-    if (recording && recorder.current) { recorder.current.stop(); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const next = new MediaRecorder(stream);
-      chunks.current = [];
-      next.ondataavailable = (event) => chunks.current.push(event.data);
-      next.onstop = () => { const blob = new Blob(chunks.current, { type: next.mimeType || "audio/webm" }); setFile(new File([blob], "reclamo-grabado.webm", { type: blob.type })); stream.getTracks().forEach((track) => track.stop()); setRecording(false); };
-      recorder.current = next; next.start(); setRecording(true);
-    } catch { setMessage("No se pudo acceder al micrófono. Puedes cargar un audio o usar texto."); }
-  };
-  const submitDisabled = busy || !health?.ready || (!file && text.trim().length < 8);
-  const diagnostic = useMemo(() => health?.models.join(" · ") ?? "Verificando QVAC…", [health]);
-
-  return <div className="app-shell">
-    <aside className="sidebar" aria-label="Navegación principal">
-      <div className="side-brand"><span className="side-brand-mark"><Icon name="spark" size={20} /></span><span>CaseFlow <b>AI</b></span></div>
-      <p className="side-context">OPERACIÓN INTERNA</p>
-      <nav className="side-nav">
-        <a href="#inicio"><Icon name="dashboard" />Resumen</a>
-        <a className="active" href="#nuevo-reclamo"><Icon name="plus" />Nuevo reclamo</a>
-        <a href="#historial"><Icon name="history" />Expedientes<span>{history.length}</span></a>
-        <a href="#privacidad"><Icon name="shield" />Privacidad</a>
-      </nav>
-      <div className="side-security"><Icon name="shield" /><div><b>Inferencia local</b><span>Sin salida a servicios de IA</span></div></div>
-      <div className="side-bank">Experiencia inspirada en<br /><strong>Caja de Ahorros</strong><small>Marca CaseFlow · demo sintética</small></div>
-    </aside>
-    <main className="app-main" id="inicio">
-      <header className="topbar">
-        <div><p className="breadcrumb">Operaciones <Icon name="chevron" size={13} /> Reclamos</p><h1>Centro de reclamos</h1></div>
-        <div className="topbar-actions"><div className="local-pill"><span className={health?.ready ? "dot" : "dot offline"} /> {health?.ready ? "Inferencia local disponible" : health?.progress ?? "Preparando inferencia local"}</div><div className="user-avatar" aria-label="Colaborador">CA</div></div>
-      </header>
-
-      <section className="welcome" aria-label="Visión general de CaseFlow">
-        <div><p className="eyebrow">RECLAMOS · DATOS SINTÉTICOS</p><h2>Prepara expedientes claros,<br /><em>en menos de dos minutos.</em></h2><p>Transcripción, procedimiento y borrador, listos para que un colaborador revise y confirme.</p></div>
-        <div className="metric"><span>Meta de preparación</span><strong>&lt; 2 min</strong><small>Antes: ~15 min por caso</small></div>
-      </section>
-
-      <section className="workspace" id="nuevo-reclamo">
-        <section className="intake-card"><div className="section-heading"><div><p className="eyebrow">01 · CAPTURA</p><h2>Nuevo reclamo</h2><p className="section-copy">Ingresa el relato escrito o captura el audio del cliente.</p></div>{busy && <span className="timer">{formatSeconds(elapsedMs)}</span>}</div>
-          <label>Describe el reclamo<textarea aria-label="Texto del reclamo" placeholder="Pega o escribe lo que reportó el cliente…" value={text} onChange={(e) => { setText(e.target.value); setFile(undefined); }} disabled={busy} /></label>
-          <button className="text-link" onClick={() => { setText(example); setFile(undefined); }}><Icon name="spark" size={15} />Cargar caso estrella de cajero</button>
-          <div className="or"><span />o usa audio<span /></div>
-          <div className="audio-actions"><button className={recording ? "record recording" : "record"} onClick={() => void toggleRecording()} disabled={busy}><Icon name="mic" size={16} />{recording ? "Detener grabación" : "Grabar por micrófono"}</button><label className="upload"><Icon name="upload" size={16} />Cargar audio<input type="file" accept="audio/*" onChange={(e) => { setFile(e.target.files?.[0]); setText(""); }} disabled={busy} /></label></div>
-          {file && <p className="file-note">Audio listo: {file.name} · se eliminará después de transcribir.</p>}
-          <button className="primary" onClick={() => void submit()} disabled={submitDisabled}><Icon name="spark" size={17} />{!health?.ready ? health?.progress ?? "Preparando modelos locales…" : busy ? stageLabel[run.status] : "Preparar expediente"}</button>
-          {message && <p className="error">{message}</p>}
-        </section>
-        <section className="result-pane">
-          {!run && <div className="empty"><span className="empty-mark"><Icon name="spark" size={29} /></span><h2>Listo para preparar</h2><p>El expediente aparecerá aquí con los datos que debes revisar antes de confirmarlo.</p><div className="empty-list"><span>✓ Clasificación local</span><span>✓ Campos faltantes</span><span>✓ Borrador asistido</span></div></div>}
-          {run && busy && <div className="progress"><p className="eyebrow">02 · PROCESAMIENTO LOCAL</p><h2>{stageLabel[run.status]}</h2><div className="progress-track"><i /></div><p>{formatSeconds(elapsedMs)} · El navegador consulta solo este servidor local.</p></div>}
-          {run?.status === "failed" && <div className="failure"><p className="eyebrow">REVISIÓN MANUAL</p><h2>No se generó un expediente automático.</h2><p>{run.error?.message}</p>{run.transcript && <label>Texto disponible<textarea value={run.transcript} readOnly /></label>}</div>}
-          {claim && run?.status === "ready" && <><EditableClaim value={claim} catalog={catalog} onChange={setClaim} /><button className="confirm" onClick={async () => { try { await api(`/api/runs/${run.id}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(claim) }); setMessage("Expediente confirmado y guardado solo en la base local."); await refresh(); } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo confirmar."); } }}>Confirmar expediente revisado</button></>}
-        </section>
-      </section>
-
-      <section className="diagnostics" id="privacidad"><div><p className="eyebrow">PRIVACIDAD Y DIAGNÓSTICO</p><h2>La inferencia no sale del equipo.</h2><p>Proveedor QVAC · ubicación local · sin endpoint de inferencia externo.</p></div><dl><div><dt>Estado</dt><dd>{health?.state ?? "sin conexión"}</dd></div><div><dt>Dispositivo</dt><dd>{health?.device ?? "—"}</dd></div><div><dt>Modelos</dt><dd>{diagnostic}</dd></div></dl></section>
-      <section className="history" id="historial"><div className="section-heading"><div><p className="eyebrow">HISTORIAL LOCAL</p><h2>Expedientes confirmados</h2></div>{history.length > 0 && <button className="danger-link" onClick={async () => { await api("/api/claims", { method: "DELETE" }); await refresh(); }}>Borrar todo</button>}</div>{history.length === 0 ? <p>No hay expedientes confirmados.</p> : <ul>{history.map((item) => <li key={item.id}><span><b>{item.procedure.id}</b> · {item.summary}</span><button className="danger-link" onClick={async () => { await api(`/api/claims/${item.id}`, { method: "DELETE" }); await refresh(); }}>Eliminar</button></li>)}</ul>}</section>
-      <footer className="app-footer" id="footer"><span>CaseFlow AI · Expedientes de reclamos</span><span>Demo con datos sintéticos · No conecta al core bancario</span><span>v0.1 · QVAC local</span></footer>
-    </main>
-  </div>;
+  const [view, setView] = useState<View>(() => ((location.hash.slice(1).split("/")[0] || "home") as View)); const [detailId, setDetailId] = useState(() => location.hash.startsWith("#case/") ? location.hash.split("/")[1] : "");
+  const [health, setHealth] = useState<Health>(); const [cases, setCases] = useState<OperationalCase[]>([]); const [catalog, setCatalog] = useState<ProcedureOption[]>([]); const [specialists, setSpecialists] = useState<Specialist[]>([]); const [prefill, setPrefill] = useState(""); const [resumeCase, setResumeCase] = useState<OperationalCase>();
+  const refresh = useCallback(async () => { try { const [nextHealth, nextCases, nextCatalog, nextSpecialists] = await Promise.all([api<Health>("/api/health"), api<OperationalCase[]>("/api/cases"), api<ProcedureOption[]>("/api/procedures"), api<Specialist[]>("/api/specialists")]); setHealth(nextHealth); setCases(nextCases); setCatalog(nextCatalog); setSpecialists(nextSpecialists); } catch { setHealth(undefined); } }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { const change = () => { if (location.hash.startsWith("#case/")) { setDetailId(location.hash.split("/")[1]); return; } const nextView = ((location.hash.slice(1) || "home") as View); setDetailId(""); setView(nextView); if (nextView !== "new") setResumeCase(undefined); }; addEventListener("hashchange", change); return () => removeEventListener("hashchange", change); }, []);
+  const navigate = (next: View) => { location.hash = next; setView(next); setDetailId(""); setResumeCase(undefined); window.scrollTo(0, 0); };
+  const openCase = (id: string) => { location.hash = `case/${id}`; setDetailId(id); window.scrollTo(0, 0); };
+  const resumeIntake = (value: OperationalCase) => { setPrefill(value.narrative); setResumeCase(value); location.hash = "new"; setView("new"); setDetailId(""); window.scrollTo(0, 0); };
+  const selected = cases.find((item) => item.id === detailId);
+  const nav: Array<{ view: View; label: string; icon: IconName }> = [{ view: "home", label: "Inicio", icon: "home" }, { view: "new", label: "Nuevo reclamo", icon: "plus" }, { view: "cases", label: "Expedientes", icon: "files" }, { view: "procedures", label: "Procedimientos", icon: "book" }, { view: "tracking", label: "Seguimiento", icon: "search" }, { view: "privacy", label: "Privacidad", icon: "shield" }];
+  return <div className="app-shell"><aside className="sidebar"><div className="brand"><span><Icon name="spark" /></span><div>CaseFlow <b>AI</b><small>Operación sintética local</small></div></div><nav>{nav.map((item) => <a key={item.view} href={`#${item.view}`} className={!detailId && view === item.view ? "active" : ""}><Icon name={item.icon} />{item.label}{item.view === "cases" && <em aria-hidden="true">{cases.filter((value) => !value.archived).length}</em>}</a>)}</nav><div className="local-box"><Icon name="shield" /><div><b>{health?.ready ? "QVAC disponible" : "Inicializando QVAC"}</b><span>Sin inferencia cloud</span></div></div><div className="bank-note">Prototipo local sintético<br /><strong>Referencia: Caja de Ahorros</strong><small>Demo no oficial · sin logo real</small></div></aside><main className="main"><header className="topbar"><div><span>CaseFlow AI</span><b>{detailId ? "Detalle del expediente" : nav.find((item) => item.view === view)?.label}</b></div><div className="top-actions"><span className={`health ${health?.ready ? "ready" : ""}`}><i />{health?.ready ? "Local y disponible" : "Preparando"}</span><span className="avatar">MO</span></div></header><div className="content">{selected ? <CaseDetail value={selected} catalog={catalog} specialists={specialists} update={(next) => setCases((current) => current.map((item) => item.id === next.id ? next : item))} back={() => navigate("cases")} resumeIntake={resumeIntake} /> : <>{view === "home" && <Dashboard cases={cases} navigate={navigate} />}{view === "new" && <NewClaim key={`${prefill}-${resumeCase?.id ?? ""}`} health={health} catalog={catalog} initialText={prefill} initialCase={resumeCase} onSaved={async (saved) => { setCases((current) => [saved, ...current.filter((item) => item.id !== saved.id)]); }} />}{view === "cases" && <CasesPage cases={cases} openCase={openCase} />}{view === "procedures" && <ProceduresPage catalog={catalog} useExample={(procedure) => { setPrefill(procedure.exampleNarrative); setResumeCase(undefined); navigate("new"); }} />}{view === "tracking" && <TrackingPage />}{view === "privacy" && <PrivacyPage health={health} />}</>}</div><footer><span>CaseFlow AI · workflow local de reclamos</span><span>Datos sintéticos · sin conexión al core bancario</span><button onClick={async () => { if (confirm("¿Restablecer los datos sintéticos de demostración?")) { setCases(await api<OperationalCase[]>("/api/demo/reset", { method: "POST" })); navigate("home"); } }}>Restablecer demo</button></footer></main></div>;
 }

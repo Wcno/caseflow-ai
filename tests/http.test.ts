@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdir, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildApp } from "../src/server/app.js";
 import type { PreparedClaim } from "../src/shared/contracts.js";
 import { createMemoryClaimStore } from "../src/server/storage/claim-store.js";
@@ -121,6 +124,91 @@ describe("local HTTP interface", () => {
     expect(invalidArea.statusCode).toBe(422);
     const inventedProcedure = await app.inject({ method: "POST", url: `/api/runs/${runId}/confirm`, payload: { ...preparedClaim, procedure: { ...preparedClaim.procedure, id: "FAKE-999" } } });
     expect(inventedProcedure.statusCode).toBe(422);
+    await app.close();
+  });
+
+  it("issues a customer ticket while the AI reference is still pending", async () => {
+    const app = buildApp({
+      prepareClaim: async () => preparedClaim,
+      store: createMemoryClaimStore(),
+      readiness: async () => ({ ready: true, models: [] })
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/cases",
+      payload: {
+        customer: { fullName: "Cliente Prueba", nationalId: "", customerNumber: "CLI-10023", intakeChannel: "phone", preferredContact: "phone" },
+        narrative: "Retiro sintetico debitado sin entrega de efectivo."
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ trackingNumber: expect.stringMatching(/^CF-\d{4}-\d{6}$/), customer: { nationalId: "" } });
+    await app.close();
+  });
+
+  it.each([
+    ["not_applicable", "cancelled", "El relato no corresponde a un reclamo bancario cubierto."],
+    ["needs_clarification", "waiting_customer", "Necesitamos saber qué operación bancaria intentaba realizar."]
+  ] as const)("publishes %s as a non-technical terminal disposition", async (expectedStatus, expectedCaseStatus, message) => {
+    const app = buildApp({
+      prepareClaim: async () => ({ kind: expectedStatus, guidance: message, transcript: "Relato sintético sin clasificación" }),
+      store: createMemoryClaimStore(),
+      readiness: async () => ({ ready: true, models: [] })
+    });
+    const reception = (await app.inject({
+      method: "POST",
+      url: "/api/cases",
+      payload: {
+        customer: { fullName: "Cliente Prueba", nationalId: "8-000-0123", customerNumber: "CLI-10023", intakeChannel: "phone", preferredContact: "phone" },
+        narrative: "Relato sintético sin clasificación"
+      }
+    })).json<{ id: string }>();
+    const created = await app.inject({ method: "POST", url: "/api/runs", payload: { kind: "text", text: "Relato sintético sin clasificación", caseId: reception.id } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const run = (await app.inject({ method: "GET", url: `/api/runs/${created.json<{ runId: string }>().runId}` })).json();
+    const operationalCase = (await app.inject({ method: "GET", url: `/api/cases/${reception.id}` })).json();
+
+    expect(run).toMatchObject({
+      status: expectedStatus,
+      transcript: "Relato sintético sin clasificación",
+      disposition: { kind: expectedStatus, guidance: message }
+    });
+    expect(run.error).toBeUndefined();
+    expect(run.result).toBeUndefined();
+    expect(operationalCase).toMatchObject({ id: reception.id, status: expectedCaseStatus, narrative: "Relato sintético sin clasificación" });
+    await app.close();
+  });
+
+  it("removes a multipart audio upload when the linked case does not exist", async () => {
+    const uploadDirectory = join(tmpdir(), "caseflow-ai");
+    await mkdir(uploadDirectory, { recursive: true });
+    const before = new Set(await readdir(uploadDirectory));
+    const boundary = "----caseflow-test-boundary";
+    const payload = Buffer.from([
+      `--${boundary}\r\n`,
+      "Content-Disposition: form-data; name=\"file\"; filename=\"claim.wav\"\r\n",
+      "Content-Type: audio/wav\r\n\r\n",
+      "synthetic audio bytes\r\n",
+      `--${boundary}--\r\n`
+    ].join(""));
+    const app = buildApp({
+      prepareClaim: async () => { throw new Error("prepareClaim should not be called"); },
+      store: createMemoryClaimStore(),
+      readiness: async () => ({ ready: true, models: [] })
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs?caseId=missing-case",
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      payload
+    });
+    const after = new Set(await readdir(uploadDirectory));
+
+    expect(response.statusCode).toBe(404);
+    expect([...after].sort()).toEqual([...before].sort());
     await app.close();
   });
 });

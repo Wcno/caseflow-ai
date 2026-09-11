@@ -1,15 +1,15 @@
 # CaseFlow AI
 
-MVP local para que un colaborador bancario transforme un reclamo por texto o voz en un expediente revisable. Está construido desde cero para el desafío **Caja de Ahorros: Inteligencia local para la banca**.
+MVP local para que colaboradores bancarios transformen un reclamo sintético por texto o voz en un expediente revisable y demuestren su recorrido desde recepción hasta cierre. Está construido desde cero para el desafío **Caja de Ahorros: Inteligencia local para la banca**.
 
-La meta demostrable es reducir la preparación inicial de aproximadamente 15 minutos a menos de 2 minutos. CaseFlow no registra casos en un core bancario ni envía respuestas: un humano revisa y confirma el expediente antes de que se guarde localmente.
+La meta demostrable es reducir la preparación inicial de aproximadamente 15 minutos a menos de 2 minutos. CaseFlow registra únicamente casos operativos sintéticos en SQLite local; no registra casos en un core bancario ni envía respuestas. Un humano revisa y confirma el expediente antes de asignarlo, investigarlo y cerrar su comunicación simulada.
 
 ## Privacidad y alcance
 
 - Toda inferencia se ejecuta en el proceso Node mediante `@qvac/sdk@0.19.0`; no hay proveedor de IA ni endpoint de inferencia cloud.
 - Una vez descargados los modelos, puede demostrarse desconectando la red. La descarga/precarga ocurre con `npm run models:prepare` y se mide aparte del benchmark.
 - El audio se convierte localmente a WAV mono 16 kHz para transcribirlo y luego se borra. Solo se guardan en SQLite los expedientes que el colaborador confirma.
-- Los 12 procedimientos y los 16 casos de prueba son **sintéticos**. No contiene ni admite datos reales de clientes para la demo.
+- Los 12 procedimientos, 16 casos de prueba y 9 expedientes precargados son **sintéticos**. No contiene ni admite datos reales de clientes para la demo.
 - La interfaz usa marca propia CaseFlow AI; no utiliza logotipos oficiales.
 
 ## Flujo
@@ -17,12 +17,16 @@ La meta demostrable es reducir la preparación inicial de aproximadamente 15 min
 ```text
 Texto / voz → Parakeet (voz) → GTE Large + RAG local → Qwen + JSON Schema estructurado
                                                      ↓
-                    procedimiento citado + área + faltantes + borrador → revisión humana → SQLite local
+                    procedimiento citado + área + faltantes + borrador → revisión humana → caso operativo local
+                                                                                         ↓
+                       seguimiento ← comunicación simulada ← cierre ← resolución ← asignación
 ```
 
-El módulo profundo es `createClaimPreparer(...)`, que expone la operación `prepareClaim(input, onProgress)` y encapsula transcripción, recuperación, inferencia, validación, temporales y errores. Sus estados observables son: `queued`, `transcribing`, `retrieving`, `analyzing`, `validating`, `ready` y `failed`. Qwen 600M usa `responseFormat: json_schema` de QVAC/llama.cpp para obtener una salida estructurada verificable; el intento real de tool call no fue fiable en este modelo, por lo que no se mantiene una herramienta falsa. La confianza se acepta como fracción 0–1 o porcentaje 0–100 y se normaliza determinísticamente a fracción.
+El módulo profundo es `createClaimPreparer(...)`, que expone la operación `prepareClaim(input, onProgress)` y encapsula transcripción, recuperación, inferencia, validación, temporales y errores. Sus estados observables son: `queued`, `transcribing`, `retrieving`, `analyzing`, `validating`, `ready`, `not_applicable`, `needs_clarification` y `failed`. Los dos estados de disposición orientan al operario sin presentarse como errores técnicos ni inventar un procedimiento. Qwen 600M usa `responseFormat: json_schema` de QVAC/llama.cpp para obtener una salida estructurada verificable; el intento real de tool call no fue fiable en este modelo, por lo que no se mantiene una herramienta falsa. La confianza se acepta como fracción 0–1 o porcentaje 0–100 y se normaliza determinísticamente a fracción.
 
 La salida se valida con Zod. El procedimiento debe estar entre los tres recuperados y dentro del catálogo local; producto, categoría y área se toman exclusivamente del procedimiento canónico; los faltantes se calculan determinísticamente a partir de `requiredFields`. Una salida inválida falla sin fabricar valores y conserva la transcripción para revisión manual.
+
+En voz, la interfaz muestra banners visibles para grabación activa, archivo listo y transcripción local terminada. La transcripción también queda visible cuando el relato no aplica o necesita aclaración, para que el operario entienda qué oyó el modelo y pueda orientar al cliente.
 
 ## Modelos QVAC
 
@@ -73,6 +77,12 @@ El recorrido de Playwright usa un adaptador determinista aislado en `scripts/e2e
 ## Caso estrella
 
 El botón “Cargar caso estrella de cajero” selecciona `ATM-001`, recomienda **Operaciones de Cajeros y Disputas**, detecta `identificador_cajero` y `hora_aproximada` como faltantes y crea un borrador que no promete resolución.
+
+## Workflow sintético
+
+La recepción emite inmediatamente un número `CF-AAAA-NNNNNN`. El estado operativo (`Recibido`, `En preparación`, `Pendiente de asignación`, `Asignado`, `En investigación`, `Pendiente del cliente`, `Resuelto`, `Cerrado` o `Cancelado`) permanece separado del estado técnico de QVAC. Un operador confirma el área y asigna manualmente a una persona sintética; el especialista completa pasos, resultados, evidencia y respuesta antes de resolver. Las comunicaciones por llamada o WhatsApp son vistas previas locales y nunca se transmiten.
+
+La aplicación incluye vistas independientes para Inicio, Nuevo reclamo, Expedientes, Procedimientos, Seguimiento y Privacidad. “Restablecer demo” recupera los nueve expedientes sintéticos sin borrar archivos fuera de la base local.
 
 ## Limitaciones deliberadas del MVP
 

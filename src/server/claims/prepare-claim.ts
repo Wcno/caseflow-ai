@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import type {
   ClaimProgress,
+  IntakeDisposition,
   IntakeInput,
   PreparedClaim
 } from "../../shared/contracts.js";
@@ -29,7 +30,7 @@ export interface ClaimPreparerDependencies {
 export type PrepareClaim = (
   input: IntakeInput,
   onProgress: (progress: ClaimProgress) => void
-) => Promise<PreparedClaim>;
+) => Promise<PreparedClaim | IntakeDisposition>;
 
 const placeholderValues = new Set([
   "",
@@ -81,6 +82,36 @@ function evidenceFields(transcript: string, requiredFields: readonly string[], p
   }));
 }
 
+function normalizedEvidence(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es").replace(/\s+/g, " ").trim();
+}
+
+function explicitCustomerReference(transcript: string, proposed: {
+  fullName?: string;
+  nationalId?: string;
+  customerNumber?: string;
+}) {
+  const source = normalizedEvidence(transcript);
+  const read = (value: unknown, digitsOnly = false) => {
+    if (typeof value !== "string" || isPlaceholder("customer", value)) return "";
+    const normalized = normalizedEvidence(value);
+    if (digitsOnly) {
+      const candidateDigits = normalized.replace(/\D/g, "");
+      const identitySegments = [
+        ...[...transcript.matchAll(/\b(?:cedula|cédula|identificacion|identificación|documento|id)\b\D{0,24}(\d[\d\s-]{2,}\d)/giu)].map((match) => match[1]),
+        ...[...transcript.matchAll(/(\d[\d\s-]{2,}\d)\D{0,24}\b(?:cedula|cédula|identificacion|identificación|documento|id)\b/giu)].map((match) => match[1])
+      ].map((segment) => segment.replace(/\D/g, ""));
+      return candidateDigits.length >= 4 && identitySegments.some((segment) => segment === candidateDigits) ? value.trim() : "";
+    }
+    return normalized.length >= 2 && source.includes(normalized) ? value.trim() : "";
+  };
+  return {
+    fullName: read(proposed.fullName),
+    nationalId: read(proposed.nationalId, true),
+    customerNumber: read(proposed.customerNumber)
+  };
+}
+
 function assertSafeDraft(candidate: string, transcript: string) {
   if (/(?:el resumen tiene|responde únicamente|candidateprocedures|procedimientos candidatos|maximum|the summary|system prompt)/iu.test(candidate)) {
     throw new ClaimPreparationError(
@@ -90,13 +121,6 @@ function assertSafeDraft(candidate: string, transcript: string) {
     );
   }
   return candidate;
-}
-
-function canonicalProcedureId(transcript: string, inferredId: string, candidates: readonly Procedure[]) {
-  const isAtmCashFailure = /\b(?:cajero|atm)\b/iu.test(transcript)
-    && /(?:no\s+(?:entreg(?:ó|o)|dispens(?:ó|o)|recib(?:í|i))\s+efectivo|sin\s+efectivo)/iu.test(transcript);
-  if (isAtmCashFailure && candidates.some((procedure) => procedure.id === "ATM-001")) return "ATM-001";
-  return inferredId;
 }
 
 export function createClaimPreparer(dependencies: ClaimPreparerDependencies): PrepareClaim {
@@ -150,8 +174,18 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
 
       report("validating");
       const analysis = await measure("validating", async () => claimAnalysisSchema.parse(rawAnalysis));
+      if (analysis.applicability !== "applicable") {
+        const fallback = analysis.applicability === "not_applicable"
+          ? "El relato no corresponde a un reclamo bancario cubierto por el catálogo local."
+          : "Necesitamos más información para identificar el reclamo y el procedimiento aplicable.";
+        return {
+          kind: analysis.applicability,
+          guidance: assertSafeDraft(analysis.applicabilityReason.trim() || fallback, transcript!),
+          transcript
+        };
+      }
       const selectedProcedure = candidateProcedures.find(
-        (procedure) => procedure.id === canonicalProcedureId(transcript!, analysis.procedureId, candidateProcedures)
+        (procedure) => procedure.id === analysis.procedureId
       );
       const catalogProcedure = dependencies.procedures.find(
         (procedure) => procedure.id === selectedProcedure?.id
@@ -165,6 +199,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
       }
 
       const extractedFields = evidenceFields(transcript!, selectedProcedure.requiredFields, analysis.extractedFields);
+      const customerReferenceCandidate = explicitCustomerReference(transcript!, analysis.customerReferenceCandidate ?? {});
       const missingInformation = selectedProcedure.requiredFields.filter((field) => {
         const value = extractedFields[field];
         return typeof value !== "string" || value.trim().length === 0;
@@ -177,6 +212,7 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         product: selectedProcedure.product,
         category: selectedProcedure.category,
         extractedFields,
+        customerReferenceCandidate,
         summary: analysis.summary,
         procedure: {
           id: selectedProcedure.id,

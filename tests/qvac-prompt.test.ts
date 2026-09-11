@@ -9,6 +9,8 @@ describe("límite de confianza del prompt QVAC", () => {
     expect(history).toHaveLength(2);
     expect(history[0].role).toBe("system");
     expect(history[0].content).not.toContain(injection);
+    expect(history[0].content).toContain("not_applicable");
+    expect(history[0].content).toContain("needs_clarification");
     expect(history[1].role).toBe("user");
     expect(JSON.parse(history[1].content).claimNarrative).toBe(injection);
   });

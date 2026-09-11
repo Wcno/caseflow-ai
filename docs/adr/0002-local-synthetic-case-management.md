@@ -1,0 +1,3 @@
+# Keep case management local and explicitly synthetic
+
+CaseFlow now demonstrates reception, assignment, investigation, resolution and customer tracking as a local vertical slice, while `prepareClaim(...)` remains the small QVAC-backed preparation interface. Operational cases, identities, staff, communications and timelines are synthetic; no customer content is sent to WhatsApp, telephony, a cloud AI provider or a bank core because end-to-end visibility is valuable for the prototype but those integrations would violate its privacy boundary and imply production controls it does not have. QVAC may extract an explicit customer reference candidate from the local intake, but the candidate remains unconfirmed until the operator reviews it.

@@ -5,6 +5,7 @@ import type {
   InferenceGateway,
   ProcedureRetriever
 } from "../src/server/claims/ports.js";
+import type { PreparedClaim } from "../src/shared/contracts.js";
 import { procedures } from "../src/server/claims/procedures.js";
 
 const heroAnalysis: ClaimAnalysis = {
@@ -35,6 +36,13 @@ const retriever: ProcedureRetriever = {
   retrieve: async () => [procedures.find((item) => item.id === "ATM-001")!]
 };
 
+function expectPreparedClaim(result: PreparedClaim | { kind: string; guidance: string; transcript: string }): PreparedClaim {
+  if ("kind" in result) {
+    throw new Error(`Expected a prepared claim, received ${result.kind}.`);
+  }
+  return result;
+}
+
 describe("prepareClaim", () => {
   it("prepares the ATM hero claim and derives required missing information", async () => {
     const stages: string[] = [];
@@ -48,13 +56,13 @@ describe("prepareClaim", () => {
       })()
     });
 
-    const result = await prepareClaim(
+    const result = expectPreparedClaim(await prepareClaim(
       {
         kind: "text",
         text: "El 9 de septiembre retiré B/.120.00 en un cajero de Vía España. La cuenta fue debitada, pero no recibí efectivo."
       },
       (progress) => stages.push(progress.stage)
-    );
+    ));
 
     expect(result.product).toBe("tarjeta_debito");
     expect(result.procedure.id).toBe("ATM-001");
@@ -85,15 +93,49 @@ describe("prepareClaim", () => {
       retriever
     });
 
-    const result = await prepareClaim({
+    const result = expectPreparedClaim(await prepareClaim({
       kind: "text",
       text: "El 9 de septiembre retiré B/.120.00 en un cajero de Vía España. La cuenta fue debitada, pero no recibí efectivo."
-    }, () => undefined);
+    }, () => undefined));
 
     expect(result.extractedFields).toMatchObject({ amount: "B/.120.00", date: "9 de septiembre", location: "Vía España" });
     expect(result.extractedFields.identificador_cajero).toBe("");
     expect(result.extractedFields.hora_aproximada).toBe("");
     expect(result.missingInformation).toEqual(["identificador_cajero", "hora_aproximada"]);
+  });
+
+  it("keeps explicit customer candidates and rejects identity values absent from the narrative", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({
+        analyze: async () => ({
+          ...heroAnalysis,
+          customerReferenceCandidate: {
+            fullName: "Ana Prueba",
+            nationalId: "8-000-0123",
+            customerNumber: "CLI-10023"
+          }
+        })
+      }),
+      procedures,
+      retriever
+    });
+
+    const result = expectPreparedClaim(await prepareClaim({
+      kind: "text",
+      text: "Ana Prueba, cédula 8-000-0123, reporta un retiro debitado sin efectivo."
+    }, () => undefined));
+
+    expect(result.customerReferenceCandidate).toEqual({ fullName: "Ana Prueba", nationalId: "8-000-0123", customerNumber: "" });
+  });
+
+  it("does not assemble a cédula from unrelated amounts and dates", async () => {
+    const prepareClaim = createClaimPreparer({
+      inference: createGateway({ analyze: async () => ({ ...heroAnalysis, customerReferenceCandidate: { fullName: "", nationalId: "80000123", customerNumber: "" } }) }),
+      procedures,
+      retriever
+    });
+    const result = expectPreparedClaim(await prepareClaim({ kind: "text", text: "El 8 de septiembre retiré B/.80.00 en cajero sin efectivo." }, () => undefined));
+    expect(result.customerReferenceCandidate?.nationalId).toBe("");
   });
 
   it("fails instead of fabricating a draft when the model leaks internal instructions", async () => {
@@ -169,12 +211,12 @@ describe("prepareClaim", () => {
       procedures,
       retriever
     });
-    const result = await prepareClaim({ kind: "text", text: "Retiro debitado sin efectivo en cajero." }, () => undefined);
+    const result = expectPreparedClaim(await prepareClaim({ kind: "text", text: "Retiro debitado sin efectivo en cajero." }, () => undefined));
     expect(result.product).toBe("tarjeta_debito");
     expect(result.category).toBe("retiro_atm_efectivo_no_entregado");
   });
 
-  it("guards the explicit ATM cash-failure signal against an ambiguous model label", async () => {
+  it("preserves the selected procedure when the model returns an applicable claim", async () => {
     const prepareClaim = createClaimPreparer({
       inference: createGateway({
         analyze: async () => ({ ...heroAnalysis, procedureId: "CTA-001", product: "cuenta_ahorro", category: "debito_no_reconocido" })
@@ -182,12 +224,12 @@ describe("prepareClaim", () => {
       procedures,
       retriever: { retrieve: async () => [procedures[0], procedures[3]] }
     });
-    const result = await prepareClaim({
+    const result = expectPreparedClaim(await prepareClaim({
       kind: "text",
       text: "Retiré $80 en un cajero, pero no recibí efectivo y la cuenta fue debitada."
-    }, () => undefined);
-    expect(result.procedure.id).toBe("ATM-001");
-    expect(result.product).toBe("tarjeta_debito");
+    }, () => undefined));
+    expect(result.procedure.id).toBe("CTA-001");
+    expect(result.product).toBe("cuenta_ahorro");
   });
 
   it("removes an audio upload even if the audio is invalid", async () => {
@@ -203,4 +245,53 @@ describe("prepareClaim", () => {
     )).rejects.toMatchObject({ transcript: undefined });
     expect(removed).toEqual(["invalid.wav"]);
   });
-});
+
+  it.each([
+    {
+      narrative: "El hermano del gobierno no me gusta, esto es una porquería.",
+      applicability: "not_applicable",
+      code: "NOT_APPLICABLE",
+      reason: "El relato no describe un reclamo bancario cubierto por el catálogo local."
+    },
+    {
+      narrative: "Los documentos de una plataforma web no me cargan y todo se ve pequeño.",
+      applicability: "needs_clarification",
+      code: "NEEDS_CLARIFICATION",
+      reason: "Aclara si se trata de la banca digital y qué operación bancaria intentabas realizar."
+    }
+  ])("returns the non-technical intake disposition $code without inventing a procedure", async ({ narrative, applicability, code, reason }) => {
+      const prepareClaim = createClaimPreparer({
+        inference: createGateway({ analyze: async () => ({ ...heroAnalysis, procedureId: "NONE", applicability, applicabilityReason: reason } as ClaimAnalysis) }),
+        procedures,
+        retriever
+      });
+
+      await expect(prepareClaim({ kind: "text", text: narrative }, () => undefined)).resolves.toMatchObject({
+        kind: applicability,
+        guidance: reason,
+        transcript: narrative
+      });
+    });
+
+    it("preserves the model disposition when the small model rejects an unequivocal cash-dispense claim", async () => {
+      const prepareClaim = createClaimPreparer({
+        inference: createGateway({ analyze: async () => ({
+          ...heroAnalysis,
+          procedureId: "NONE",
+          applicability: "not_applicable",
+          applicabilityReason: "No se encontró un procedimiento."
+        }) }),
+        procedures,
+        retriever
+      });
+
+      await expect(prepareClaim({
+        kind: "text",
+        text: "Retiré B/.80.00 en un cajero; la cuenta fue debitada, pero no recibí efectivo."
+      }, () => undefined)).resolves.toMatchObject({
+        kind: "not_applicable",
+        guidance: "No se encontró un procedimiento.",
+        transcript: "Retiré B/.80.00 en un cajero; la cuenta fue debitada, pero no recibí efectivo."
+      });
+    });
+  });
