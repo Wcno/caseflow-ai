@@ -36,3 +36,5 @@ input,textarea,select{border-color:#c1d0df;border-radius:10px;box-shadow:0 1px 1
 .bank-note{font-size:0}.bank-note strong,.bank-note small{display:none!important}.bank-note:before{content:"Caja de Ahorros";display:block;color:var(--bank-gold);font-size:13px;font-weight:800}.bank-note:after{content:"CaseFlow AI  ·  Centro de reclamos";display:block;margin-top:3px;color:#b8d2ec;font-size:10px}
 .topbar:after{content:"Caja de Ahorros"}.hero h1,.page-heading h1,.detail-header h1{font-weight:780;text-wrap:balance}.hero p:not(.eyebrow),.page-heading>p:not(.eyebrow){max-width:65ch}.card h2,.split h2{font-weight:760}
 @media(max-width:680px){.topbar:after{content:"Caja de Ahorros"}.brand>div:before{font-size:15px}.brand small:before{font-size:8px}}
+@media(max-width:1100px){.brand>div{display:block!important}}
+@media(max-width:420px){.brand>div{display:block!important}}
