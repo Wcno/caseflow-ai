@@ -8,6 +8,12 @@
 .field-help{color:#71849a;font-size:10px;font-weight:600;line-height:1.35}.operator-guide{display:grid;grid-template-columns:minmax(220px,.55fr) 1fr;gap:18px;margin-bottom:15px}.operator-guide ol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0;padding-left:20px;color:#405873;font-size:12px;line-height:1.45}.operator-guide li{padding-right:10px}
 @media(max-width:680px){.operator-guide,.operator-guide ol{grid-template-columns:1fr}}
 
+/* Refined readable type scale for the operations desk. */
+:root{font-family:"Aptos","Segoe UI Variable","Segoe UI",system-ui,sans-serif;font-size:16px;font-synthesis:none}
+body{line-height:1.48}
+.hero h1,.page-heading h1,.detail-header h1{letter-spacing:-.035em;line-height:1.08}
+.hero p:not(.eyebrow),.page-heading>p:not(.eyebrow){line-height:1.6}
+
 /* Caja de Ahorros enterprise refinement */
 :root{--bank-navy:#003366;--bank-deep:#002b49;--bank-gold:#f4c542;--bank-mint:#0a9b72;--surface:#f5f8fb;--focus:rgba(0,82,135,.22)}
 body{background:var(--surface);color:#172b43}
@@ -24,3 +30,9 @@ input,textarea,select{border-color:#c1d0df;border-radius:10px;box-shadow:0 1px 1
 .diagnostic{position:relative;overflow:hidden;border-color:#0d5a80;background:linear-gradient(135deg,#002b49,#003f66 58%,#075e78);box-shadow:0 16px 30px rgba(0,43,73,.18)}.diagnostic:before{content:"LOCAL TELEMETRY  /  AIR-GAPPED RUNTIME";position:absolute;top:17px;right:22px;color:#7fe0c0;font:700 9px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:1px}.diagnostic h2{letter-spacing:-.2px}.diagnostic dl{position:relative;z-index:1;grid-template-columns:repeat(3,minmax(0,1fr));width:min(690px,100%);padding:15px;border:1px solid rgba(141,210,231,.25);border-radius:10px;background:rgba(0,20,37,.3);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.diagnostic dt{color:#8dd9eb;letter-spacing:1px}.diagnostic dd{color:#effbff}.scope-note{border-color:#d8c47d;background:#fffbed}.scope-note b{color:#624b0c}
 .skeleton{height:12px;border-radius:99px;background:linear-gradient(90deg,#e5edf4 25%,#f6f9fb 40%,#e5edf4 65%);background-size:300% 100%;animation:skeleton 1.25s ease-in-out infinite}@keyframes skeleton{to{background-position:-300% 0}}
 @media(max-width:680px){.topbar:after{content:"Caja de Ahorros  ·  Demo no oficial";margin-right:0;padding:6px 8px;font-size:9px}.diagnostic:before{position:static;display:block;margin-bottom:12px}.diagnostic dl{width:100%}.brand small:after{content:" · CA"}.customer-candidate{align-items:flex-start}}
+
+/* Caja de Ahorros naming and star mark. */
+.brand>span:after{content:none}.brand>span .icon{opacity:1}.brand>div{font-size:0}.brand>div:before{content:"Caja de Ahorros";display:block;color:#fff;font-size:20px;font-weight:780;letter-spacing:-.45px}.brand small{font-size:0}.brand small:before{content:"CaseFlow AI  ·  operación local";font-size:9px;color:#d7e7f5;letter-spacing:.35px}.brand small:after{content:none}
+.bank-note{font-size:0}.bank-note strong,.bank-note small{display:none!important}.bank-note:before{content:"Caja de Ahorros";display:block;color:var(--bank-gold);font-size:13px;font-weight:800}.bank-note:after{content:"CaseFlow AI  ·  Centro de reclamos";display:block;margin-top:3px;color:#b8d2ec;font-size:10px}
+.topbar:after{content:"Caja de Ahorros"}.hero h1,.page-heading h1,.detail-header h1{font-weight:780;text-wrap:balance}.hero p:not(.eyebrow),.page-heading>p:not(.eyebrow){max-width:65ch}.card h2,.split h2{font-weight:760}
+@media(max-width:680px){.topbar:after{content:"Caja de Ahorros"}.brand>div:before{font-size:15px}.brand small:before{font-size:8px}}
