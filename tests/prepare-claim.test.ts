@@ -273,7 +273,7 @@ describe("prepareClaim", () => {
       });
     });
 
-    it("preserves the model disposition when the small model rejects an unequivocal cash-dispense claim", async () => {
+    it("guards the unequivocal cash-dispense claim when the small model rejects it", async () => {
       const prepareClaim = createClaimPreparer({
         inference: createGateway({ analyze: async () => ({
           ...heroAnalysis,

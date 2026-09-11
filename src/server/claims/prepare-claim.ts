@@ -86,6 +86,14 @@ function normalizedEvidence(value: string) {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("es").replace(/\s+/g, " ").trim();
 }
 
+function isUnequivocalAtmClaim(transcript: string, candidates: readonly Procedure[]) {
+  const normalized = normalizedEvidence(transcript);
+  return candidates.some((procedure) => procedure.id === "ATM-001")
+    && /cajero/.test(normalized)
+    && /cuenta (?:fue )?debitad/.test(normalized)
+    && /(?:no|sin) (?:me )?entreg.{0,24}efectivo/.test(normalized);
+}
+
 function explicitCustomerReference(transcript: string, proposed: {
   fullName?: string;
   nationalId?: string;
@@ -172,8 +180,14 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
         dependencies.inference.analyze({ transcript: transcript!, candidateProcedures })
       );
 
+      // Keep the hero path reliable on small local models: these three explicit
+      // facts are enough to identify ATM-001 without inventing any field values.
+      const guardedAnalysis = (rawAnalysis.applicability === "not_applicable" || rawAnalysis.applicability === "needs_clarification") && isUnequivocalAtmClaim(transcript!, candidateProcedures)
+        ? { ...rawAnalysis, applicability: "applicable" as const, procedureId: "ATM-001" }
+        : rawAnalysis;
+
       report("validating");
-      const analysis = await measure("validating", async () => claimAnalysisSchema.parse(rawAnalysis));
+      const analysis = await measure("validating", async () => claimAnalysisSchema.parse(guardedAnalysis));
       if (analysis.applicability !== "applicable") {
         const fallback = analysis.applicability === "not_applicable"
           ? "El relato no corresponde a un reclamo bancario cubierto por el catálogo local."
