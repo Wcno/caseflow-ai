@@ -91,7 +91,12 @@ function isUnequivocalAtmClaim(transcript: string, candidates: readonly Procedur
   return candidates.some((procedure) => procedure.id === "ATM-001")
     && /cajero/.test(normalized)
     && /cuenta (?:fue )?debitad/.test(normalized)
-    && /(?:no|sin) (?:me )?entreg.{0,24}efectivo/.test(normalized);
+    && /(?:no|sin) (?:me )?(?:entreg|recib).{0,24}efectivo/.test(normalized);
+}
+
+function isPotentialBankingClaim(transcript: string) {
+  const normalized = normalizedEvidence(transcript);
+  return /\b(?:banco|cuenta|cajero|atm|tarjeta|transferencia|retiro|dep[oó]sito|banca)\b/.test(normalized);
 }
 
 function explicitCustomerReference(transcript: string, proposed: {
@@ -182,9 +187,12 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
 
       // Keep the hero path reliable on small local models: these three explicit
       // facts are enough to identify ATM-001 without inventing any field values.
-      const guardedAnalysis = (rawAnalysis.applicability === "not_applicable" || rawAnalysis.applicability === "needs_clarification") && isUnequivocalAtmClaim(transcript!, candidateProcedures)
+      const guardedAnalysis = isUnequivocalAtmClaim(transcript!, candidateProcedures)
+        && (rawAnalysis.applicability === "not_applicable" || rawAnalysis.applicability === "needs_clarification")
         ? { ...rawAnalysis, applicability: "applicable" as const, procedureId: "ATM-001" }
-        : rawAnalysis;
+        : rawAnalysis.applicability === "not_applicable" && isPotentialBankingClaim(transcript!)
+          ? { ...rawAnalysis, applicability: "needs_clarification" as const, procedureId: "NONE" }
+          : rawAnalysis;
 
       report("validating");
       const analysis = await measure("validating", async () => claimAnalysisSchema.parse(guardedAnalysis));

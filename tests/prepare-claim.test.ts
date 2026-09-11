@@ -273,6 +273,18 @@ describe("prepareClaim", () => {
       });
     });
 
+    it("turns a banking narrative rejected by the small model into clarification", async () => {
+      const prepareClaim = createClaimPreparer({
+        inference: createGateway({ analyze: async () => ({ ...heroAnalysis, procedureId: "NONE", applicability: "not_applicable", applicabilityReason: "No se mencionÃ³ un procedimiento." }) }),
+        procedures,
+        retriever
+      });
+      await expect(prepareClaim({ kind: "text", text: "Fui al banco y retirÃ© dinero del cajero, pero no explico quÃ© ocurriÃ³." }, () => undefined)).resolves.toMatchObject({
+        kind: "needs_clarification",
+        transcript: "Fui al banco y retirÃ© dinero del cajero, pero no explico quÃ© ocurriÃ³."
+      });
+    });
+
     it("guards the unequivocal cash-dispense claim when the small model rejects it", async () => {
       const prepareClaim = createClaimPreparer({
         inference: createGateway({ analyze: async () => ({
