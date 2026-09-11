@@ -40,3 +40,17 @@ input,textarea,select{border-color:#c1d0df;border-radius:10px;box-shadow:0 1px 1
 @media(max-width:420px){.brand>div{display:block!important}}
 .form-grid>label{align-self:start}
 .row>label{margin-top:0}
+/* More comfortable reading scale for daily operator use. */
+body{font-size:16px}
+.sidebar nav a{font-size:14px}
+.topbar span{font-size:11px}
+.topbar b{font-size:18px}
+label{font-size:12px}
+input,textarea,select{font-size:13px}
+.field-help,.identity-assist,.audio-banner small,.transcript-banner small{font-size:11px}
+.secondary,.primary,.link-button,.danger-link,.back,.icon-action{font-size:12px}
+.card p:not(.eyebrow):not(.step),.card li,.empty p{font-size:13px}
+.metrics span,.summary-grid span{font-size:11px}
+.metrics small{font-size:11px}
+footer,footer button{font-size:11px}
+@media(max-width:680px){.sidebar nav a{font-size:0}.topbar b{font-size:16px}.content{padding-top:24px}}
