@@ -1,8 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { buildApp } from "./app.js";
-import { createClaimPreparer } from "./claims/prepare-claim.js";
-import { procedures } from "./claims/procedures.js";
+import { createClaimPreparer, procedures } from "./claims/index.js";
 import { QvacRuntime } from "./qvac/qvac-runtime.js";
 import { createSqliteClaimStore } from "./storage/claim-store.js";
 import { createSqliteCaseStore } from "./cases/case-store.js";
