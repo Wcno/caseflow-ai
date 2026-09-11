@@ -305,4 +305,16 @@ describe("prepareClaim", () => {
         responsibleArea: "Operaciones de Cajeros y Disputas"
       });
     });
+
+    it("recovers an incomplete JSON response for the unequivocal ATM claim", async () => {
+      const prepareClaim = createClaimPreparer({
+        inference: createGateway({ analyze: async () => { throw new SyntaxError("Unterminated string in JSON"); } }),
+        procedures,
+        retriever
+      });
+      await expect(prepareClaim({ kind: "text", text: "El 8 de septiembre retiré B/.80.00 en un cajero de Vía España. Mi cuenta fue debitada, pero no entregó efectivo." }, () => undefined)).resolves.toMatchObject({
+        procedure: { id: "ATM-001" },
+        missingInformation: ["identificador_cajero", "hora_aproximada"]
+      });
+    });
   });

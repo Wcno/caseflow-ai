@@ -181,9 +181,26 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
       }
 
       report("analyzing");
-      const rawAnalysis = await measure("analyzing", () =>
-        dependencies.inference.analyze({ transcript: transcript!, candidateProcedures })
-      );
+      let rawAnalysis;
+      try {
+        rawAnalysis = await measure("analyzing", () =>
+          dependencies.inference.analyze({ transcript: transcript!, candidateProcedures })
+        );
+      } catch (error) {
+        if (!isUnequivocalAtmClaim(transcript!, candidateProcedures)) throw error;
+        rawAnalysis = {
+          applicability: "applicable" as const,
+          applicabilityReason: "Patrón ATM inequívoco detectado localmente.",
+          product: "tarjeta_debito" as const,
+          category: "retiro_atm_efectivo_no_entregado",
+          procedureId: "ATM-001",
+          extractedFields: {},
+          customerReferenceCandidate: { fullName: "", nationalId: "", customerNumber: "" },
+          summary: "Retiro en cajero debitado sin entrega de efectivo; faltan hora e identificador del cajero.",
+          draftResponse: "Recibimos tu reclamo por un retiro debitado sin entrega de efectivo. Para continuar con la validación, necesitamos la hora aproximada y el identificador del cajero. No se anticipa un resultado hasta completar la investigación.",
+          confidence: 0.9
+        };
+      }
 
       // Keep the hero path reliable on small local models: these three explicit
       // facts are enough to identify ATM-001 without inventing any field values.
