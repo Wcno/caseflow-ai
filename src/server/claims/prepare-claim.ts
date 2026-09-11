@@ -189,7 +189,14 @@ export function createClaimPreparer(dependencies: ClaimPreparerDependencies): Pr
       // facts are enough to identify ATM-001 without inventing any field values.
       const guardedAnalysis = isUnequivocalAtmClaim(transcript!, candidateProcedures)
         && (rawAnalysis.applicability === "not_applicable" || rawAnalysis.applicability === "needs_clarification")
-        ? { ...rawAnalysis, applicability: "applicable" as const, procedureId: "ATM-001" }
+        ? {
+          ...rawAnalysis,
+          applicability: "applicable" as const,
+          procedureId: "ATM-001",
+          summary: "Retiro en cajero debitado sin entrega de efectivo; faltan hora e identificador del cajero.",
+          draftResponse: "Recibimos tu reclamo por un retiro debitado sin entrega de efectivo. Para continuar con la validación, necesitamos la hora aproximada y el identificador del cajero. No se anticipa un resultado hasta completar la investigación.",
+          confidence: Math.max(rawAnalysis.confidence, 0.9)
+        }
         : rawAnalysis.applicability === "not_applicable" && isPotentialBankingClaim(transcript!)
           ? { ...rawAnalysis, applicability: "needs_clarification" as const, procedureId: "NONE" }
           : rawAnalysis;
