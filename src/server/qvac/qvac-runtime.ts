@@ -223,7 +223,9 @@ export class QvacRuntime implements InferenceGateway, ProcedureRetriever {
       history: buildAnalysisHistory(input.transcript, input.candidateProcedures),
       stream: false,
       captureThinking: false,
-      generationParams: { temp: 0.1, predict: 500, reasoning_budget: 0 },
+      // The structured schema is intentionally compact; a lower output budget
+      // keeps the local 600M model responsive while retaining all fields.
+      generationParams: { temp: 0.05, predict: 320, reasoning_budget: 0 },
       responseFormat: {
         type: "json_schema",
         json_schema: { name: "prepared_claim_analysis", schema: constrainedSchema, strict: true }
