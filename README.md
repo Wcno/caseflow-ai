@@ -80,8 +80,6 @@ El audio se convierte a WAV mono de 16 kHz, se transcribe y se elimina. Sólo se
 ### Documentación
 
 - [Arquitectura](docs/architecture.md)
-- [Guion del video](docs/video-script.md)
 - [Decisiones de interfaz](docs/ui-decision.md)
-- [Investigación de QVAC](docs/research/qvac-sdk-0.19.md)
 
 La propiedad intelectual permanece en el equipo. No se versionan modelos, cachés, expedientes ni secretos.
