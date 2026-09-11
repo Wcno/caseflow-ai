@@ -52,7 +52,7 @@ git clone https://github.com/Wcno/caseflow-ai.git
 cd caseflow-ai
 npm install
 npm run doctor
-npm run models:prepare   # Internet sólo la primera vez
+npm run models:prepare   # precarga los modelos antes de la demo offline
 npm run dev
 ```
 
