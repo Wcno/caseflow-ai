@@ -38,3 +38,5 @@ input,textarea,select{border-color:#c1d0df;border-radius:10px;box-shadow:0 1px 1
 @media(max-width:680px){.topbar:after{content:"Caja de Ahorros"}.brand>div:before{font-size:15px}.brand small:before{font-size:8px}}
 @media(max-width:1100px){.brand>div{display:block!important}}
 @media(max-width:420px){.brand>div{display:block!important}}
+.form-grid>label{align-self:start}
+.row>label{margin-top:0}
