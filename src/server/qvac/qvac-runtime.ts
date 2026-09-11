@@ -50,6 +50,7 @@ const analysisJsonSchema = {
   additionalProperties: false
 };
 const rawAnalysisSchema = claimAnalysisSchema.extend({ confidence: z.number().min(0).max(100) });
+const analysisGenerationParams = { temp: 0.05, predict: 512, reasoning_budget: 0 };
 
 type RuntimeState = "idle" | "loading" | "ready" | "failed";
 
@@ -222,21 +223,31 @@ export class QvacRuntime implements InferenceGateway, ProcedureRetriever {
         procedureId: { type: "string", enum: ["NONE", ...input.candidateProcedures.map((procedure) => procedure.id)] }
       }
     };
-    const run = completion({
+    const history = buildAnalysisHistory(input.transcript, input.candidateProcedures);
+    const complete = (retry = false) => completion({
       modelId: this.llmId!,
-      history: buildAnalysisHistory(input.transcript, input.candidateProcedures),
+      history: retry ? [...history, {
+        role: "user" as const,
+        content: "La respuesta anterior no pudo validarse como JSON. Genera nuevamente el objeto completo, válido y sin texto adicional."
+      }] : history,
       stream: false,
       captureThinking: false,
-      // The structured schema is intentionally compact; a lower output budget
-      // keeps the local 600M model responsive while retaining all fields.
-      generationParams: { temp: 0.05, predict: 320, reasoning_budget: 0 },
+      // A claim can include multiple required fields and a customer response.
+      // Leave enough room for the closing JSON delimiters on small local models.
+      generationParams: analysisGenerationParams,
       responseFormat: {
         type: "json_schema",
         json_schema: { name: "prepared_claim_analysis", schema: constrainedSchema, strict: true }
       }
     });
-    const final = await run.final;
-    const rawAnalysis = rawAnalysisSchema.parse(JSON.parse(final.contentText));
+    const parseAnalysis = (content: string) => rawAnalysisSchema.parse(JSON.parse(content));
+    let rawAnalysis;
+    try {
+      rawAnalysis = parseAnalysis((await complete().final).contentText);
+    } catch (error) {
+      if (!(error instanceof SyntaxError || error instanceof z.ZodError)) throw error;
+      rawAnalysis = parseAnalysis((await complete(true).final).contentText);
+    }
     return claimAnalysisSchema.parse({
       ...rawAnalysis,
       confidence: rawAnalysis.confidence > 1 ? rawAnalysis.confidence / 100 : rawAnalysis.confidence
